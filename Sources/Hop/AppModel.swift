@@ -64,9 +64,9 @@ final class AppModel: ObservableObject {
 
     /// Request to open a specific screen (from the right-click menu).
     @Published var openTab: PanelView.InitialScreen?
-    /// Monotonic request token: the panel hotkey opens the panel directly into
-    /// command search without changing ordinary menu-bar-click behavior.
-    @Published var commandPaletteRequest = 0
+    /// One-shot request: the panel hotkey opens a CLOSED panel directly into
+    /// command search. The panel consumes and clears it on appearance.
+    @Published var commandPaletteRequested = false
     /// Close the popover (for "copy and paste").
     var closePanel: (() -> Void)?
     /// Bring the panel back on a module's own terms — the eyedropper closes it
