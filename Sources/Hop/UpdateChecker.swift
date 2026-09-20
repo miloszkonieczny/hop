@@ -64,6 +64,7 @@ final class UpdateChecker: ObservableObject {
 
     init() {
         Self.cleanupStagingLeftovers()
+        Self.cleanupResolvedReplacementTransactions()
     }
 
     /// Installs stage the new bundle into temporaryDirectory/hop-update-<UUID>,
@@ -76,6 +77,48 @@ final class UpdateChecker: ObservableObject {
         guard let entries = try? fm.contentsOfDirectory(atPath: tmp.path) else { return }
         for name in entries where name.hasPrefix("hop-update-") {
             try? fm.removeItem(at: tmp.appendingPathComponent(name))
+        }
+    }
+
+    /// Recover only transaction leftovers whose state is unambiguous:
+    /// - launch-stable exists: the replacement committed, old rollback is disposable;
+    /// - guard-ready is absent: the parent never reached the atomic swap gate, so
+    ///   rollbackPath can only be the not-yet-installed candidate.
+    ///
+    /// A ready-but-unacknowledged transaction is NEVER guessed at. It may be an
+    /// active guard or the sole recovery copy after an interrupted rollback.
+    private static func cleanupResolvedReplacementTransactions() {
+        let fm = FileManager.default
+        guard let caches = fm.urls(for: .cachesDirectory, in: .userDomainMask).first else {
+            return
+        }
+        let cacheRoot = caches.appendingPathComponent(
+            UpdateCodeSignaturePolicy.expectedBundleIdentifier,
+            isDirectory: true
+        )
+        guard let entries = try? fm.contentsOfDirectory(atPath: cacheRoot.path) else {
+            return
+        }
+
+        let prefix = "hop-update-transaction-"
+        for name in entries where name.hasPrefix(prefix) {
+            let transactionID = String(name.dropFirst(prefix.count))
+            guard !transactionID.isEmpty,
+                  !transactionID.contains("/"),
+                  !transactionID.contains("..")
+            else { continue }
+
+            let plan = UpdateReplacementPlan(
+                targetPath: "/Applications/Hop.app",
+                cacheDirectory: cacheRoot.path,
+                transactionID: transactionID
+            )
+            let committed = fm.fileExists(atPath: plan.stableAcknowledgementPath)
+            let guardStarted = fm.fileExists(atPath: plan.guardReadyPath)
+            guard committed || !guardStarted else { continue }
+
+            try? fm.removeItem(atPath: plan.rollbackPath)
+            try? fm.removeItem(atPath: plan.stateDirectory)
         }
     }
 
@@ -297,68 +340,202 @@ final class UpdateChecker: ObservableObject {
                 .appendingPathComponent("hop-update-\(UUID().uuidString)")
             try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
 
-            try run("/usr/bin/ditto", ["-xk", tempZip.path, staging.path])
-            guard let appName = try FileManager.default.contentsOfDirectory(atPath: staging.path)
-                .first(where: { $0.hasSuffix(".app") })
+            guard try run("/usr/bin/ditto", ["-xk", tempZip.path, staging.path]) == 0
             else { throw URLError(.cannotParseResponse) }
+            let apps = try FileManager.default.contentsOfDirectory(atPath: staging.path)
+                .filter { $0.hasSuffix(".app") }
+            guard apps == ["Hop.app"] else {
+                // A release archive has one application bundle, with the
+                // canonical name. Ambiguous/multi-app archives fail closed.
+                throw URLError(.cannotParseResponse)
+            }
+            let appName = apps[0]
             let newApp = staging.appendingPathComponent(appName)
+            try validateUpdateBundle(newApp, info: info)
 
-            // Bind the separately fetched manifest to the archive we actually
-            // authenticated. Otherwise a compromised mirror could replay an old,
-            // legitimately signed Hop archive while advertising a fabricated
-            // newer version. The extracted bundle must identify itself as the
-            // manifest version, keep Hop's bundle identity, and contain the CPU
-            // slice this running process needs.
-            guard let candidate = Bundle(url: newApp),
-                  let expectedBundleIdentifier = Bundle.main.bundleIdentifier,
-                  UpdateArtifactBinding.accepts(
-                    manifestVersion: info.version,
-                    embeddedVersion: candidate.infoDictionary?["CFBundleShortVersionString"] as? String,
-                    expectedBundleIdentifier: expectedBundleIdentifier,
-                    embeddedBundleIdentifier: candidate.bundleIdentifier,
-                    expectedCPUType: Self.runningCPUType,
-                    executableCPUTypes: candidate.executableArchitectures?.map(\.intValue) ?? []
-                  )
-            else { throw URLError(.cannotParseResponse) }
-
-            // The archive signature is not the only trust root: the extracted
-            // bundle must also be valid Apple-signed Hop code from the expected
-            // Developer ID team. This rejects ad-hoc, development-signed, broken,
-            // or differently signed bundles even if somebody obtained the
-            // Ed25519 release key. Check this before removing quarantine.
-            guard try run(
-                "/usr/bin/codesign",
-                UpdateCodeSignaturePolicy.verificationArguments(appPath: newApp.path)
-            ) == 0 else {
+            let fm = FileManager.default
+            let target = URL(fileURLWithPath: "/Applications/Hop.app")
+            guard fm.fileExists(atPath: target.path) else {
+                // Auto-update is replacement, never first-install. Refuse to
+                // manufacture a new production install when the canonical one is
+                // missing.
                 throw URLError(.cannotParseResponse)
             }
 
-            // quarantine is removed ONLY after archive authenticity, artifact
-            // identity and Apple distribution identity have all been proven.
-            _ = try? run("/usr/bin/xattr", ["-dr", "com.apple.quarantine", newApp.path])
+            // A copied production bundle launched from Downloads or a mounted
+            // image must not silently replace some other /Applications/Hop.app.
+            // The rollback guard also relies on its helper executable belonging
+            // to the exact bundle being exchanged.
+            let runningBundle = Bundle.main.bundleURL.resolvingSymlinksInPath().standardizedFileURL
+            let canonicalTarget = target.resolvingSymlinksInPath().standardizedFileURL
+            guard runningBundle.path == canonicalTarget.path else {
+                throw URLError(.cannotParseResponse)
+            }
 
-            let target = "/Applications/\(appName)"
-            try? FileManager.default.removeItem(atPath: target)
-            // ditto rather than copyItem: it is the tool that carries a bundle
-            // across whole — extended attributes, ACLs, symlinks — and a bundle
-            // that arrives intact keeps the signature macOS ties its
-            // permissions to.
-            try run("/usr/bin/ditto", [newApp.path, target])
+            guard let caches = fm.urls(for: .cachesDirectory, in: .userDomainMask).first,
+                  let helperExecutable = Bundle.main.executableURL
+            else { throw URLError(.cannotParseResponse) }
 
-            // relaunch into the new version. A plain `open` here would only
-            // activate the still-running old instance and nothing would start
-            // the new one after terminate — so a detached shell waits for this
-            // process to die and opens the fresh bundle afterwards
-            let pid = ProcessInfo.processInfo.processIdentifier
-            let relauncher = Process()
-            relauncher.executableURL = URL(fileURLWithPath: "/bin/sh")
-            relauncher.arguments = ["-c",
-                "while /bin/kill -0 \(pid) 2>/dev/null; do /bin/sleep 0.2; done; /usr/bin/open \"\(target)\""]
-            try relauncher.run() // deliberately not waited on — it must outlive us
-            NSApp.terminate(nil)
+            let cacheRoot = caches.appendingPathComponent(
+                UpdateCodeSignaturePolicy.expectedBundleIdentifier,
+                isDirectory: true
+            )
+            let plan = UpdateReplacementPlan(
+                targetPath: target.path,
+                cacheDirectory: cacheRoot.path,
+                transactionID: UUID().uuidString
+            )
+            try fm.createDirectory(
+                atPath: plan.stateDirectory,
+                withIntermediateDirectories: true
+            )
+
+            var guardProcess: Process?
+            var helperOwnsRecovery = false
+            var swapped = false
+
+            do {
+                // Copy the already-authenticated bundle to a HIDDEN sibling on
+                // the same volume as Hop.app. RENAME_SWAP is only atomic when
+                // both directory entries share a filesystem.
+                guard try run(
+                    "/usr/bin/ditto",
+                    [newApp.path, plan.rollbackPath]
+                ) == 0 else {
+                    throw URLError(.cannotParseResponse)
+                }
+
+                let sameVolumeCandidate = URL(fileURLWithPath: plan.rollbackPath)
+                // Verify AGAIN after the copy. The object about to be swapped in,
+                // not merely its source in /tmp, is what must satisfy every
+                // artifact and Developer-ID invariant.
+                try validateUpdateBundle(sameVolumeCandidate, info: info)
+
+                // Quarantine is removed only from the verified candidate. The
+                // currently installed app has not been touched yet.
+                _ = try? run(
+                    "/usr/bin/xattr",
+                    ["-dr", "com.apple.quarantine", sameVolumeCandidate.path]
+                )
+
+                // Start the rollback guard from the OLD executable before the
+                // paths are exchanged, and require a readiness marker from the
+                // helper itself. Process.run() alone only proves exec was
+                // accepted by the kernel.
+                let helper = Process()
+                helper.executableURL = helperExecutable
+                helper.arguments = plan.guardArguments(
+                    parentPID: ProcessInfo.processInfo.processIdentifier
+                )
+                try helper.run()
+                guardProcess = helper
+                guard UpdateRollbackGuard.waitUntilReady(path: plan.guardReadyPath) else {
+                    helper.terminate()
+                    throw URLError(.cannotParseResponse)
+                }
+
+                // One filesystem operation: target becomes the verified
+                // candidate and rollbackPath becomes the known-good old app.
+                try UpdateAtomicReplacement.swap(
+                    plan.targetPath,
+                    plan.rollbackPath
+                )
+                swapped = true
+
+                // Verify the bundle at its FINAL canonical path as a last guard
+                // against copy/swap/path mistakes. If this fails, exchange the
+                // directories back before returning control to the user.
+                do {
+                    try validateFinalInstalledBundle(target, info: info)
+                } catch {
+                    do {
+                        try UpdateAtomicReplacement.swap(
+                            plan.targetPath,
+                            plan.rollbackPath
+                        )
+                        swapped = false
+                    } catch {
+                        // Do not clean either side: the helper and the still-live
+                        // old process preserve the last recoverable state.
+                        helperOwnsRecovery = true
+                    }
+                    throw error
+                }
+
+                // From here the helper owns the rollback copy. It waits for this
+                // process to die, launches the candidate, and keeps the old app
+                // until the new one survives LaunchGuard.stableAfter.
+                helperOwnsRecovery = true
+                NSApp.terminate(nil)
+            } catch {
+                if !helperOwnsRecovery {
+                    guardProcess?.terminate()
+                    // Safe only before the swap or after a successful swap-back:
+                    // rollbackPath then contains the failed NEW candidate.
+                    if !swapped {
+                        try? fm.removeItem(atPath: plan.rollbackPath)
+                    }
+                    try? fm.removeItem(atPath: plan.stateDirectory)
+                }
+                throw error
+            }
         } catch {
             status = .failed
             scheduleStatusExpiry()
+        }
+    }
+
+    private func validateUpdateBundle(_ app: URL, info: ReleaseInfo) throws {
+        guard let candidate = Bundle(url: app),
+              UpdateArtifactBinding.accepts(
+                manifestVersion: info.version,
+                embeddedVersion: candidate.infoDictionary?["CFBundleShortVersionString"] as? String,
+                expectedBundleIdentifier: UpdateCodeSignaturePolicy.expectedBundleIdentifier,
+                embeddedBundleIdentifier: candidate.bundleIdentifier,
+                expectedCPUType: Self.runningCPUType,
+                executableCPUTypes: candidate.executableArchitectures?.map(\.intValue) ?? []
+              )
+        else { throw URLError(.cannotParseResponse) }
+
+        // Archive authenticity is necessary but not sufficient: the bundle at
+        // EACH stage must also be intact Developer ID code from Hop's expected
+        // Apple team.
+        guard try run(
+            "/usr/bin/codesign",
+            UpdateCodeSignaturePolicy.verificationArguments(appPath: app.path)
+        ) == 0 else {
+            throw URLError(.cannotParseResponse)
+        }
+    }
+
+    private func validateFinalInstalledBundle(
+        _ app: URL,
+        info: ReleaseInfo
+    ) throws {
+        // Do not use Bundle(url:) for the canonical path here. Bundle.main still
+        // represents the already-running OLD process and Foundation may cache
+        // bundle metadata by URL across the atomic directory swap. Read the
+        // candidate's Info.plist directly from disk instead.
+        let plistURL = app.appendingPathComponent("Contents/Info.plist")
+        let data = try Data(contentsOf: plistURL)
+        guard let plist = try PropertyListSerialization.propertyList(
+                from: data,
+                options: [],
+                format: nil
+              ) as? [String: Any],
+              plist["CFBundleShortVersionString"] as? String == info.version,
+              plist["CFBundleIdentifier"] as? String
+                == UpdateCodeSignaturePolicy.expectedBundleIdentifier
+        else { throw URLError(.cannotParseResponse) }
+
+        // The same directory entry was architecture-checked immediately before
+        // RENAME_SWAP, which changes names rather than bytes. Re-check the code
+        // signature at the final canonical path to catch any path/copy mistake.
+        guard try run(
+            "/usr/bin/codesign",
+            UpdateCodeSignaturePolicy.verificationArguments(appPath: app.path)
+        ) == 0 else {
+            throw URLError(.cannotParseResponse)
         }
     }
 
