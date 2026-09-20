@@ -176,6 +176,14 @@ final class UpdateAtomicReplacementTests: XCTestCase {
             cache + "/hop-update-transaction-ABC/arbitrary-file",
             cacheDirectory: cache
         ))
+        XCTAssertFalse(UpdateRollbackProtocol.isValidAcknowledgementPath(
+            cache + "/hop-update-transaction-/launch-stable",
+            cacheDirectory: cache
+        ))
+        XCTAssertFalse(UpdateRollbackProtocol.isValidAcknowledgementPath(
+            cache + "/hop-update-transaction-../launch-stable",
+            cacheDirectory: cache
+        ))
     }
 
 }
