@@ -111,6 +111,12 @@ public enum ClipboardRules {
         let text = String(raw.prefix(maxItemLength))
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return nil }
+
+        // Clipboard history is persistence. High-confidence credentials stay on
+        // the system pasteboard (so the user's copy still works) but do not enter
+        // Hop's durable history. This check lives here rather than only in the
+        // AppKit poller so every text producer follows the same rule.
+        guard !ClipboardSecretDetector.containsSecret(text) else { return nil }
         // case-insensitive comparison: dictation changes capitalization
         // retroactively. Image and file entries never take part in text dedup —
         // their label ("1280 × 800", a file name) may collide with copied text
@@ -166,6 +172,17 @@ public enum ClipboardRules {
         var out = items.filter { $0.colorHex?.uppercased() != key }
         out.insert(ClipboardItem(text: text, colorHex: key), at: 0)
         return out
+    }
+
+    /// Remove high-confidence secret TEXT entries from an already-persisted
+    /// history. File/image/color rows are metadata or app-produced values and are
+    /// deliberately left alone. This makes the protection self-healing when a
+    /// user upgrades from a build that persisted credentials before this rule
+    /// existed.
+    public static func removingSecrets(from items: [ClipboardItem]) -> [ClipboardItem] {
+        items.filter { item in
+            !(item.isPlainText && ClipboardSecretDetector.containsSecret(item.text))
+        }
     }
 
     /// Enforce both caps at once; the caller deletes the files of the
