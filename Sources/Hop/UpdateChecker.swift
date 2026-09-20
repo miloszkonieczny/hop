@@ -218,6 +218,19 @@ final class UpdateChecker: ObservableObject {
         #endif
     }
 
+    /// CPU type expected in the downloaded executable. Keep this keyed to the
+    /// running process rather than the physical Mac for the same Rosetta reason
+    /// as archKey(_:).
+    private static var runningCPUType: Int {
+        #if arch(x86_64)
+        return UpdateArtifactBinding.x86_64CPUType
+        #elseif arch(arm64)
+        return UpdateArtifactBinding.arm64CPUType
+        #else
+        return -1
+        #endif
+    }
+
     private func fetchNewerRelease() async -> ReleaseInfo? {
         guard releaseKey != nil else { return nil } // updater is disabled without a key
         guard let url = UpdateFeed.checkURL(feed: Self.feedURL, version: currentVersion)
@@ -290,9 +303,26 @@ final class UpdateChecker: ObservableObject {
             else { throw URLError(.cannotParseResponse) }
             let newApp = staging.appendingPathComponent(appName)
 
-            // quarantine is removed ONLY after the Ed25519 signature check above:
-            // release authenticity is already proven by our key, and Gatekeeper
-            // would simply block the ad-hoc build otherwise
+            // Bind the separately fetched manifest to the archive we actually
+            // authenticated. Otherwise a compromised mirror could replay an old,
+            // legitimately signed Hop archive while advertising a fabricated
+            // newer version. The extracted bundle must identify itself as the
+            // manifest version, keep Hop's bundle identity, and contain the CPU
+            // slice this running process needs.
+            guard let candidate = Bundle(url: newApp),
+                  let expectedBundleIdentifier = Bundle.main.bundleIdentifier,
+                  UpdateArtifactBinding.accepts(
+                    manifestVersion: info.version,
+                    embeddedVersion: candidate.infoDictionary?["CFBundleShortVersionString"] as? String,
+                    expectedBundleIdentifier: expectedBundleIdentifier,
+                    embeddedBundleIdentifier: candidate.bundleIdentifier,
+                    expectedCPUType: Self.runningCPUType,
+                    executableCPUTypes: candidate.executableArchitectures?.map(\.intValue) ?? []
+                  )
+            else { throw URLError(.cannotParseResponse) }
+
+            // quarantine is removed ONLY after both authenticity and artifact
+            // identity have been proven.
             _ = try? run("/usr/bin/xattr", ["-dr", "com.apple.quarantine", newApp.path])
 
             let target = "/Applications/\(appName)"
