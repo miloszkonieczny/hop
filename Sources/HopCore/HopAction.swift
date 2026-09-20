@@ -270,7 +270,7 @@ public enum HopActionCatalog {
                 return $0.1 < $1.1
             }
             .prefix(limit)
-            .map(\.2)
+            .map { $0.2 }
     }
 
     private static func normalize(_ value: String) -> String {
