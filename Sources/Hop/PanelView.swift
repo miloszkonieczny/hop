@@ -362,7 +362,9 @@ struct PanelView: View {
         .onChange(of: trackerEditing) { _, _ in syncKeyboardCapture() }
         .onChange(of: todosEditing) { _, _ in syncKeyboardCapture() }
         .onChange(of: clipboardSearching) { _, _ in syncKeyboardCapture() }
+        .onChange(of: shellSearchFocused) { _, _ in syncKeyboardCapture() }
         .onDisappear {
+            shellSearchFocused = false
             model.panelKeyboardCaptured = false
             // A normal left-click / hotkey reopen does not fire the openTab
             // handler (openTab stays nil), and @State survives the popover
@@ -376,6 +378,14 @@ struct PanelView: View {
             let resolved = Self.resolve(target)
             screen = resolved
             if case .space(let id) = resolved { activeSpaceRaw = id.uuidString }
+            switch target {
+            case .spaceContaining(let module):
+                selectHopSpace(HopSpace.containing(module: module), persist: true)
+            case .firstSpace:
+                selectHopSpace(.work, persist: true)
+            case .restore:
+                break
+            }
             model.openTab = nil
         }
     }
@@ -1265,7 +1275,8 @@ struct PanelView: View {
     /// the controller keeps focus in the panel; once all drop, hand the
     /// keyboard back to the app underneath.
     private func syncKeyboardCapture() {
-        let captured = editUnit != nil || trackerEditing || todosEditing || clipboardSearching
+        let captured = editUnit != nil || trackerEditing || todosEditing
+            || clipboardSearching || shellSearchFocused
         model.panelKeyboardCaptured = captured
         if !captured { model.panelFocusChanged?() }
     }
@@ -1277,7 +1288,8 @@ struct PanelView: View {
         // keyboard: Return commits the field's own text (and ⌘V pastes into it),
         // it must NOT drive the timer or the converter. Bailing here lets the key
         // fall through to the TextField's own paste / onSubmit.
-        guard !trackerEditing, !todosEditing, !clipboardSearching else { return .ignored }
+        guard !trackerEditing, !todosEditing, !clipboardSearching, !shellSearchFocused
+        else { return .ignored }
 
         // Cmd+V / Cmd+Shift+V feed the clipboard into the converter, exactly
         // like a drop onto its row. Gated to the converter being on the ACTIVE
