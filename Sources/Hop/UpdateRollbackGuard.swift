@@ -41,6 +41,22 @@ enum UpdateRollbackGuard {
         touch(path)
     }
 
+    /// A clean exit before the 30-second stability acknowledgement is not enough
+    /// to commit the replacement. Record it separately so the guard can restore
+    /// the old version without relaunching against the user's explicit quit.
+    static func recordCleanExitIfRequested() {
+        guard let stablePath = UpdateRollbackProtocol.acknowledgementPath(
+            arguments: CommandLine.arguments
+        ),
+        UpdateRollbackProtocol.isValidAcknowledgementPath(
+            stablePath,
+            cacheDirectory: transactionCacheDirectory
+        ) else { return }
+        touch(UpdateRollbackProtocol.cleanExitPath(
+            forAcknowledgementPath: stablePath
+        ))
+    }
+
     /// Parent-side readiness gate. A successful Process.run() only proves the
     /// kernel accepted exec; the updater does not exchange bundles until the
     /// helper itself has parsed its transaction and written this marker.
@@ -80,12 +96,22 @@ enum UpdateRollbackGuard {
         // Supervise the replacement through LaunchServices. open -W stays alive
         // while the launched app does: an immediate crash therefore triggers an
         // immediate rollback instead of waiting out the entire stability timer.
-        let stable = launchAndWaitForStableAcknowledgement(
+        let outcome = launchAndWaitForStableAcknowledgement(
             appPath: request.targetPath,
             acknowledgementPath: request.stableAcknowledgementPath,
+            cleanExitPath: UpdateRollbackProtocol.cleanExitPath(
+                forAcknowledgementPath: request.stableAcknowledgementPath
+            ),
             timeout: LaunchGuard.stableAfter + stableLaunchGrace
         )
-        guard stable else { return rollbackAndRelaunch(request) }
+        switch outcome {
+        case .stable:
+            break
+        case .cleanEarlyExit:
+            return rollback(request, relaunch: false)
+        case .failed:
+            return rollback(request, relaunch: true)
+        }
 
         // The new app survived the same window Hop already calls a successful
         // launch. Only now is the old bundle discarded.
@@ -93,8 +119,9 @@ enum UpdateRollbackGuard {
         return 0
     }
 
-    private static func rollbackAndRelaunch(
-        _ request: UpdateRollbackProtocol.GuardRequest
+    private static func rollback(
+        _ request: UpdateRollbackProtocol.GuardRequest,
+        relaunch: Bool
     ) -> Int32 {
         do {
             try UpdateAtomicReplacement.swap(
@@ -111,6 +138,7 @@ enum UpdateRollbackGuard {
         // known-good old app again.
         try? FileManager.default.removeItem(atPath: request.rollbackPath)
         try? FileManager.default.removeItem(atPath: request.stateDirectoryPath)
+        guard relaunch else { return 0 }
         return launchDetached(appPath: request.targetPath, arguments: []) ? 0 : 4
     }
 
@@ -122,11 +150,18 @@ enum UpdateRollbackGuard {
         try? fm.removeItem(atPath: request.stateDirectoryPath)
     }
 
+    private enum LaunchOutcome {
+        case stable
+        case cleanEarlyExit
+        case failed
+    }
+
     private static func launchAndWaitForStableAcknowledgement(
         appPath: String,
         acknowledgementPath: String,
+        cleanExitPath: String,
         timeout: TimeInterval
-    ) -> Bool {
+    ) -> LaunchOutcome {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
         process.arguments = [
@@ -141,7 +176,7 @@ enum UpdateRollbackGuard {
         do {
             try process.run()
         } catch {
-            return false
+            return .failed
         }
 
         let deadline = Date().addingTimeInterval(timeout)
@@ -150,14 +185,24 @@ enum UpdateRollbackGuard {
                 // -W is only the waiting wrapper. Ending it after acknowledgement
                 // does not terminate the already-running application.
                 if process.isRunning { process.terminate() }
-                return true
+                return .stable
             }
-            if !process.isRunning { return false }
+            if !process.isRunning {
+                return FileManager.default.fileExists(atPath: cleanExitPath)
+                    ? .cleanEarlyExit
+                    : .failed
+            }
             usleep(pollInterval)
         }
 
         if process.isRunning { process.terminate() }
-        return FileManager.default.fileExists(atPath: acknowledgementPath)
+        if FileManager.default.fileExists(atPath: acknowledgementPath) {
+            return .stable
+        }
+        if FileManager.default.fileExists(atPath: cleanExitPath) {
+            return .cleanEarlyExit
+        }
+        return .failed
     }
 
     private static func launchDetached(appPath: String, arguments: [String]) -> Bool {
