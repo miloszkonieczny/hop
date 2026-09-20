@@ -85,6 +85,15 @@ struct PanelView: View {
     @AppStorage(KeepAwakeController.keepDisplayKey) private var awakeKeepDisplay = true
 
     @State private var screen: Screen
+    /// The fixed semantic shell is independent from the legacy tab storage.
+    /// `screen` is retained as the compatibility/source-tab context for module
+    /// actions while this selects what the user actually sees.
+    @State private var hopSpace: HopSpace
+    /// A targeted reopen (for example the eyedropper returning a colour) pins
+    /// that module to the top of its semantic space for this opening.
+    @State private var preferredModuleID: String?
+    @State private var shellQuery = ""
+    @FocusState private var shellSearchFocused: Bool
     // nil → the overlay back button falls through to the restored space
     @State private var scrubBaseDuration: TimeInterval?
     @State private var scrubUnit: TimeInterval?
@@ -237,8 +246,10 @@ struct PanelView: View {
     init(initial: InitialScreen = .restore, standaloneSettings: Bool = false,
          previewModules: [String] = [], layoutTableOnly: Bool = false) {
         // The panel content view is built once at launch, so this resolves the
-        // restored space from UserDefaults directly.
+        // legacy source-tab context and the new semantic shell independently.
         _screen = State(initialValue: Self.resolve(initial))
+        _hopSpace = State(initialValue: Self.resolveHopSpace(initial))
+        _preferredModuleID = State(initialValue: Self.preferredModule(for: initial))
         self.standaloneSettings = standaloneSettings
         self.previewModules = previewModules
         self.layoutTableOnly = layoutTableOnly
@@ -355,7 +366,9 @@ struct PanelView: View {
         .onChange(of: trackerEditing) { _, _ in syncKeyboardCapture() }
         .onChange(of: todosEditing) { _, _ in syncKeyboardCapture() }
         .onChange(of: clipboardSearching) { _, _ in syncKeyboardCapture() }
+        .onChange(of: shellSearchFocused) { _, _ in syncKeyboardCapture() }
         .onDisappear {
+            shellSearchFocused = false
             model.panelKeyboardCaptured = false
             // A normal left-click / hotkey reopen does not fire the openTab
             // handler (openTab stays nil), and @State survives the popover
@@ -369,6 +382,18 @@ struct PanelView: View {
             let resolved = Self.resolve(target)
             screen = resolved
             if case .space(let id) = resolved { activeSpaceRaw = id.uuidString }
+            switch target {
+            case .spaceContaining(let module):
+                selectHopSpace(
+                    HopSpace.containing(module: module),
+                    persist: true,
+                    preferredModule: module
+                )
+            case .firstSpace:
+                selectHopSpace(.work, persist: true)
+            case .restore:
+                break
+            }
             model.openTab = nil
         }
     }
@@ -1158,44 +1183,16 @@ struct PanelView: View {
         }
     }
 
-    /// The body of the active screen — the space's module stack, or the
-    /// settings/about overlay content. This is the ONLY part that scrolls.
+    /// The body of the compact semantic shell. The old `PanelTabsModel`
+    /// remains untouched underneath: each placement carries the legacy source
+    /// tab id back into `moduleBlock`, so module settings/actions keep the same
+    /// storage identity while Work / Mac / Tools controls presentation.
     private var panelContent: some View {
         VStack(spacing: 16) {
-            switch screen {
-            case .space(let rawID):
-                // resolve a possibly-dead id (its space may have been deleted
-                // from the settings window since this panel was built)
-                let id = effectiveSpaceID(rawID)
-                let modules = visibleModules(in: id)
-                if modules.isEmpty {
-                    Text(t(.tabEmptyHint))
-                        .font(Theme.mono(11))
-                        .foregroundStyle(Theme.textTertiary)
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 28)
-                } else {
-                    // a stack of the space's modules in order. Inner spacing equals
-                    // the outer one (16): the divider sits exactly midway between
-                    // modules, with equal space above and below
-                    // With the setting on, the three window modules are drawn as
-                    // ONE row where the first of them sits, and the other two drop
-                    // out of the list — see `collapsedModules`.
-                    let rendered = collapsedModules(modules)
-                    ForEach(Array(rendered.enumerated()), id: \.element) { index, key in
-                        if index == 0 {
-                            moduleBlock(key, in: id)
-                        } else {
-                            VStack(spacing: 16) {
-                                Rectangle()
-                                    .fill(Theme.divider)
-                                    .frame(height: 1)
-                                moduleBlock(key, in: id)
-                            }
-                        }
-                    }
-                }
+            if shellQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                shellSpaceContent
+            } else {
+                shellSearchResults
             }
         }
         .padding(.horizontal, 14)
@@ -1203,11 +1200,96 @@ struct PanelView: View {
         .frame(width: 368)
     }
 
-    /// Fresh ScrollView identity per screen so switching always starts at the top.
-    private var scrollResetKey: String {
-        switch screen {
-        case .space(let id): return "space:\(effectiveSpaceID(id).uuidString)"
+    @ViewBuilder private var shellSpaceContent: some View {
+        let placements = collapsedPlacements(displayPlacements(in: hopSpace))
+        if placements.isEmpty {
+            Text(t(.tabEmptyHint))
+                .font(Theme.mono(11))
+                .foregroundStyle(Theme.textTertiary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 28)
+        } else {
+            ForEach(Array(placements.enumerated()), id: \.element.id) { index, placement in
+                if index == 0 {
+                    moduleBlock(placement.moduleID, in: placement.sourceTabID)
+                } else {
+                    VStack(spacing: 16) {
+                        Rectangle()
+                            .fill(Theme.divider)
+                            .frame(height: 1)
+                        moduleBlock(placement.moduleID, in: placement.sourceTabID)
+                    }
+                }
+            }
         }
+    }
+
+    /// Stage-one search is intentionally navigation-only: it finds existing
+    /// modules and moves to their semantic space. PR #6 will replace this with
+    /// executable `HopAction` results. Shipping a dead search field would be
+    /// worse than shipping this small but real behavior.
+    private var shellSearchResults: some View {
+        let query = shellQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let matches = allVisiblePlacements.filter { placement in
+            let title = moduleTitle(placement.moduleID).lowercased()
+            return title.contains(query) || placement.moduleID.lowercased().contains(query)
+        }
+        return VStack(spacing: 6) {
+            if matches.isEmpty {
+                Text("No matching tools")
+                    .font(Theme.mono(11))
+                    .foregroundStyle(Theme.textTertiary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 24)
+            } else {
+                ForEach(matches.prefix(8)) { placement in
+                    let destination = HopSpace.containing(module: placement.moduleID)
+                    Button {
+                        selectHopSpace(
+                            destination,
+                            persist: true,
+                            preferredModule: placement.moduleID
+                        )
+                        shellQuery = ""
+                        shellSearchFocused = false
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: destination.systemImage)
+                                .font(.system(size: 11))
+                                .foregroundStyle(Theme.textTertiary)
+                                .frame(width: 18)
+                            Text(moduleTitle(placement.moduleID))
+                                .font(Theme.mono(11))
+                                .foregroundStyle(Theme.textPrimary)
+                                .lineLimit(1)
+                            Spacer(minLength: 8)
+                            Text(destination.title)
+                                .font(Theme.mono(9))
+                                .foregroundStyle(Theme.textTertiary)
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 8, weight: .semibold))
+                                .foregroundStyle(Theme.textTertiary)
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .background(Theme.rowBg, in: RoundedRectangle(cornerRadius: 7))
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .hoverHighlight(7)
+                }
+            }
+        }
+    }
+
+    /// A fresh ScrollView identity per semantic space/query makes every switch
+    /// start at the top while the fixed chrome stays pixel-stable.
+    private var scrollResetKey: String {
+        if shellQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "hop-space:\(hopSpace.rawValue)"
+        }
+        return "hop-search:\(shellQuery)"
     }
 
     private var chromeHeightReader: some View {
@@ -1258,7 +1340,8 @@ struct PanelView: View {
     /// the controller keeps focus in the panel; once all drop, hand the
     /// keyboard back to the app underneath.
     private func syncKeyboardCapture() {
-        let captured = editUnit != nil || trackerEditing || todosEditing || clipboardSearching
+        let captured = editUnit != nil || trackerEditing || todosEditing
+            || clipboardSearching || shellSearchFocused
         model.panelKeyboardCaptured = captured
         if !captured { model.panelFocusChanged?() }
     }
@@ -1270,7 +1353,8 @@ struct PanelView: View {
         // keyboard: Return commits the field's own text (and ⌘V pastes into it),
         // it must NOT drive the timer or the converter. Bailing here lets the key
         // fall through to the TextField's own paste / onSubmit.
-        guard !trackerEditing, !todosEditing, !clipboardSearching else { return .ignored }
+        guard !trackerEditing, !todosEditing, !clipboardSearching, !shellSearchFocused
+        else { return .ignored }
 
         // Cmd+V / Cmd+Shift+V feed the clipboard into the converter, exactly
         // like a drop onto its row. Gated to the converter being on the ACTIVE
@@ -1296,8 +1380,7 @@ struct PanelView: View {
                 && press.key.character.lowercased() == "v"
         }
         if isPasteChord {
-            guard let id = currentSpaceID,
-                  visibleModules(in: id).contains("convert"),
+            guard currentShellModuleKeys.contains("convert"),
                   editUnit == nil
             else { return .ignored }
             if model.converter.addFromPasteboard() {
@@ -1306,8 +1389,7 @@ struct PanelView: View {
             return .handled
         }
 
-        guard let id = currentSpaceID,
-              visibleModules(in: id).contains("timer"),
+        guard currentShellModuleKeys.contains("timer"),
               !model.engine.isStopwatch,
               model.engine.state == .idle || model.engine.state == .finished
         else { return .ignored }
@@ -1480,18 +1562,69 @@ struct PanelView: View {
 
     // MARK: - Header
 
+    /// Compact fixed shell: real module navigation now has one stable place
+    /// instead of exposing the legacy user-tab implementation directly.
     private var header: some View {
-        HStack(spacing: 8) {
-            if tabsModel.tabs.count > 1 { tabSwitcher }
-            Spacer()
-            headerIcon("gearshape", help: t(.settingsTitle)) {
-                model.openSettingsWindow?()
+        VStack(spacing: 8) {
+            HStack(spacing: 8) {
+                HStack(spacing: 7) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.textTertiary)
+                    TextField("Find tools…", text: $shellQuery)
+                        .textFieldStyle(.plain)
+                        .font(Theme.mono(11))
+                        .foregroundStyle(Theme.textPrimary)
+                        .focused($shellSearchFocused)
+                        .onSubmit { openSingleShellSearchMatch() }
+                }
+                .padding(.horizontal, 9)
+                .frame(height: 30)
+                .background(Theme.rowBg, in: RoundedRectangle(cornerRadius: 7))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 7)
+                        .stroke(shellSearchFocused ? Theme.textTertiary.opacity(0.55) : Theme.divider,
+                                lineWidth: 1)
+                )
+
+                headerIcon("gearshape", help: t(.settingsTitle)) {
+                    model.openSettingsWindow?()
+                }
+                headerIcon("power", help: t(.menuQuit)) {
+                    model.requestQuit?()
+                }
             }
-            headerIcon("power", help: t(.menuQuit)) {
-                model.requestQuit?()
+            hopSpaceSwitcher
+        }
+    }
+
+    private var hopSpaceSwitcher: some View {
+        HStack(spacing: 2) {
+            ForEach(HopSpace.allCases, id: \.rawValue) { space in
+                Button {
+                    selectHopSpace(space, persist: true)
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: space.systemImage)
+                            .font(.system(size: 11))
+                        Text(space.title)
+                            .font(Theme.mono(10, weight: .semibold))
+                    }
+                    .foregroundStyle(hopSpace == space ? Theme.textPrimary : Theme.textTertiary)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 28)
+                    .background(
+                        hopSpace == space ? Theme.chipBg : Color.clear,
+                        in: RoundedRectangle(cornerRadius: 6)
+                    )
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .hoverHighlight(6)
             }
         }
-        .frame(height: 34)
+        .padding(2)
+        .overlay(RoundedRectangle(cornerRadius: 7).stroke(Theme.divider, lineWidth: 1))
     }
 
     /// Every icon in the header carries its name on hover: an icon alone is a
@@ -1508,41 +1641,6 @@ struct PanelView: View {
         .buttonStyle(.plain)
         .hoverHighlight()
         .help(help)
-    }
-
-    // Tab button geometry. At maxTabs (4): 4×56 + inner gaps + the 3-icon
-    // service trio still fit the 340pt header content.
-    private static let tabButtonWidth: CGFloat = 56
-    private static let tabSpacing: CGFloat = 2
-
-    // an icon row of the user's spaces, chip-highlighting the active one. Pure
-    // switcher: add/reorder/rename/delete all moved to settings, so there is no
-    // "+", drag, or context menu here. The stroke container groups the icons.
-    private var tabSwitcher: some View {
-        HStack(spacing: Self.tabSpacing) {
-            ForEach(tabsModel.tabs) { tab in
-                spaceTabButton(tab)
-            }
-        }
-        .padding(2)
-        .overlay(RoundedRectangle(cornerRadius: 7).stroke(Theme.divider, lineWidth: 1))
-    }
-
-    private func spaceTabButton(_ tab: PanelTab) -> some View {
-        // compare against the LIVE current space (same derivation the content
-        // uses), so the highlight never lands on a deleted id or on nothing
-        let active = currentSpaceID == tab.id
-        return Image(systemName: tab.icon)
-            .font(.system(size: 15))
-            .foregroundStyle(active ? Theme.textPrimary : Theme.textTertiary)
-            .frame(width: Self.tabButtonWidth, height: 28)
-            .background(
-                active ? Theme.chipBg : .clear,
-                in: RoundedRectangle(cornerRadius: 6)
-            )
-            .contentShape(Rectangle())
-            .hoverHighlight(6)
-            .onTapGesture { switchToSpace(tab.id) }
     }
 
     /// First catalog icon no tab already uses (fallback: the first entry), so a
@@ -2907,6 +3005,27 @@ struct PanelView: View {
         }
     }
 
+    /// Resolve the semantic shell independently from the legacy source tab.
+    /// Targeted opens (OCR, colour, system, etc.) always land in the semantic
+    /// home of that module; an ordinary reopen restores the last shell space.
+    private static func resolveHopSpace(_ initial: InitialScreen) -> HopSpace {
+        switch initial {
+        case .firstSpace:
+            return .work
+        case .spaceContaining(let module):
+            return HopSpace.containing(module: module)
+        case .restore:
+            return HopSpaceLayout.restoredSpace(
+                from: UserDefaults.standard.string(forKey: SettingsKey.hopSpace)
+            )
+        }
+    }
+
+    private static func preferredModule(for initial: InitialScreen) -> String? {
+        if case .spaceContaining(let module) = initial { return module }
+        return nil
+    }
+
     private func mutateTabs(_ body: (inout PanelTabsModel) -> Void) {
         var model = tabsModel
         body(&model)
@@ -2914,6 +3033,94 @@ struct PanelView: View {
         // Module-gated combos follow visibility: showing a module claims its
         // hotkey, hiding it hands the combo back to the rest of the system.
         HotkeyManager.shared.refreshModuleHotkeys()
+    }
+
+    private var allVisiblePlacements: [HopSpaceModulePlacement] {
+        HopSpace.allCases.flatMap { visiblePlacements(in: $0) }
+    }
+
+    private var currentShellModuleKeys: Set<String> {
+        Set(visiblePlacements(in: hopSpace).map(\.moduleID))
+    }
+
+    /// The shell is a semantic projection over the existing stored board. The
+    /// source tab id travels with every module, so no migration or destructive
+    /// rewrite of `panelTabs` is needed.
+    private func visiblePlacements(in space: HopSpace) -> [HopSpaceModulePlacement] {
+        HopSpaceLayout.placements(in: tabsModel, space: space)
+            .filter { moduleVisible($0.moduleID) }
+    }
+
+    private func displayPlacements(in space: HopSpace) -> [HopSpaceModulePlacement] {
+        let placements = visiblePlacements(in: space)
+        guard let preferredModuleID,
+              let index = placements.firstIndex(where: { $0.moduleID == preferredModuleID }),
+              index > 0
+        else { return placements }
+
+        var reordered = placements
+        let preferred = reordered.remove(at: index)
+        reordered.insert(preferred, at: 0)
+        return reordered
+    }
+
+    private func collapsedPlacements(
+        _ placements: [HopSpaceModulePlacement]
+    ) -> [HopSpaceModulePlacement] {
+        guard toolsOneRow else { return placements }
+        let present = placements.filter { Self.toolModules.contains($0.moduleID) }
+        guard present.count > 1, let first = present.first else { return placements }
+
+        var inserted = false
+        return placements.compactMap { placement in
+            guard Self.toolModules.contains(placement.moduleID) else { return placement }
+            guard !inserted else { return nil }
+            inserted = true
+            return HopSpaceModulePlacement(
+                moduleID: Self.toolsRowKey,
+                sourceTabID: first.sourceTabID
+            )
+        }
+    }
+
+    private func selectHopSpace(
+        _ space: HopSpace,
+        persist: Bool,
+        preferredModule: String? = nil
+    ) {
+        hopSpace = space
+        preferredModuleID = preferredModule
+        shellQuery = ""
+        if persist {
+            UserDefaults.standard.set(space.rawValue, forKey: SettingsKey.hopSpace)
+        }
+
+        // Keep the old source-tab context coherent for compatibility code that
+        // still asks which legacy tab owns an action. No stored module layout is
+        // changed here.
+        let source = preferredModule.flatMap { module in
+            visiblePlacements(in: space).first { $0.moduleID == module }
+        } ?? visiblePlacements(in: space).first
+        if let source {
+            screen = .space(source.sourceTabID)
+            activeSpaceRaw = source.sourceTabID.uuidString
+        }
+    }
+
+    private func openSingleShellSearchMatch() {
+        let query = shellQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !query.isEmpty else { return }
+        let matches = allVisiblePlacements.filter { placement in
+            moduleTitle(placement.moduleID).lowercased().contains(query)
+                || placement.moduleID.lowercased().contains(query)
+        }
+        guard matches.count == 1, let match = matches.first else { return }
+        selectHopSpace(
+            HopSpace.containing(module: match.moduleID),
+            persist: true,
+            preferredModule: match.moduleID
+        )
+        shellSearchFocused = false
     }
 
     /// The three window modules, in the order the row shows them. The
@@ -2925,49 +3132,14 @@ struct PanelView: View {
     /// and switching the setting back changes nothing else.
     private static let toolsRowKey = "tools:row"
 
-    /// The module list as it is DRAWN. With `toolsOneRow` on, the first of the
-    /// three tools becomes the combined row and the others disappear from the
-    /// list; with it off, nothing changes.
-    private func collapsedModules(_ modules: [String]) -> [String] {
-        guard toolsOneRow else { return modules }
-        let present = modules.filter { Self.toolModules.contains($0) }
-        guard present.count > 1 else { return modules }
-        var replaced = false
-        return modules.compactMap { key in
-            guard Self.toolModules.contains(key) else { return key }
-            guard !replaced else { return nil }
-            replaced = true
-            return Self.toolsRowKey
-        }
-    }
-
-    /// Which tools the collapsed row offers, in the panel's own order.
-    private func toolsInRow(_ id: UUID) -> [ToolsRowView.Tool] {
-        visibleModules(in: id)
+    /// Which tools the collapsed row offers, in the semantic shell's order.
+    /// The source tab no longer limits this row: convert/archive may have lived
+    /// on different legacy tabs, but Tools presents them as one semantic group.
+    private func toolsInRow(_: UUID) -> [ToolsRowView.Tool] {
+        visiblePlacements(in: hopSpace)
+            .map(\.moduleID)
             .filter { Self.toolModules.contains($0) }
             .compactMap { ToolsRowView.Tool(rawValue: $0) }
-    }
-
-    private func visibleModules(in id: UUID) -> [String] {
-        (tabsModel.tabs.first { $0.id == id }?.moduleKeys ?? [])
-            .filter { moduleVisible($0) }
-    }
-
-    /// The space id to actually render and highlight for a stored `screen` id.
-    /// The panel is built once at launch and `screen` only resolves in `init`,
-    /// so a space deleted meanwhile (from the standalone settings window, a
-    /// separate PanelView instance) leaves a dead id in this instance's state.
-    /// Derive the live id at every read site — do NOT mutate `@State` in body —
-    /// so the rendered content and the tab highlight always agree. `tabs` is
-    /// never empty (the model guarantees 1...maxTabs), so `tabs[0]` is safe.
-    private func effectiveSpaceID(_ id: UUID) -> UUID {
-        tabsModel.tabs.contains { $0.id == id } ? id : tabsModel.tabs[0].id
-    }
-
-    /// The live space currently shown, or nil when the panel isn't on a space.
-    private var currentSpaceID: UUID? {
-        if case .space(let id) = screen { return effectiveSpaceID(id) }
-        return nil
     }
 
     /// The rule itself lives in HopCore so it can be tested; see
