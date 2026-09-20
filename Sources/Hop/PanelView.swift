@@ -1366,11 +1366,34 @@ struct PanelView: View {
     /// Keyboard time entry into the selected digit group: digits slide in from the
     /// right (0 → 2 gives :02). The group is picked by clicking/hovering the display.
     private func handleKey(_ press: KeyPress) -> KeyPress.Result {
+        if shellSearchFocused {
+            switch press.key {
+            case .downArrow:
+                moveCommandSelection(by: 1)
+                return .handled
+            case .upArrow:
+                moveCommandSelection(by: -1)
+                return .handled
+            case .escape:
+                if shellQuery.isEmpty {
+                    shellSearchFocused = false
+                } else {
+                    shellQuery = ""
+                    shellSelectionIndex = 0
+                }
+                return .handled
+            default:
+                // Return belongs to TextField.onSubmit; normal typing/paste must
+                // reach the field untouched.
+                return .ignored
+            }
+        }
+
         // A focused tracker/to-do field or the clipboard search field owns the
         // keyboard: Return commits the field's own text (and ⌘V pastes into it),
         // it must NOT drive the timer or the converter. Bailing here lets the key
         // fall through to the TextField's own paste / onSubmit.
-        guard !trackerEditing, !todosEditing, !clipboardSearching, !shellSearchFocused
+        guard !trackerEditing, !todosEditing, !clipboardSearching
         else { return .ignored }
 
         // Cmd+V / Cmd+Shift+V feed the clipboard into the converter, exactly
@@ -3052,8 +3075,15 @@ struct PanelView: View {
         HotkeyManager.shared.refreshModuleHotkeys()
     }
 
-    private var allVisiblePlacements: [HopSpaceModulePlacement] {
-        HopSpace.allCases.flatMap { visiblePlacements(in: $0) }
+    private var availableHopActions: [HopAction] {
+        HopActionCatalog.all.filter { action in
+            guard let module = action.requiredModuleID else { return true }
+            return moduleVisible(module)
+        }
+    }
+
+    private var currentActionMatches: [HopAction] {
+        HopActionCatalog.search(shellQuery, in: availableHopActions, limit: 8)
     }
 
     private var currentShellModuleKeys: Set<String> {
@@ -3124,20 +3154,124 @@ struct PanelView: View {
         }
     }
 
-    private func openSingleShellSearchMatch() {
-        let query = shellQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !query.isEmpty else { return }
-        let matches = allVisiblePlacements.filter { placement in
-            moduleTitle(placement.moduleID).lowercased().contains(query)
-                || placement.moduleID.lowercased().contains(query)
+    private func consumeCommandPaletteRequest() {
+        guard model.commandPaletteRequested else { return }
+        model.commandPaletteRequested = false
+        shellQuery = ""
+        shellSelectionIndex = 0
+        DispatchQueue.main.async {
+            shellSearchFocused = true
         }
-        guard matches.count == 1, let match = matches.first else { return }
-        selectHopSpace(
-            HopSpace.containing(module: match.moduleID),
-            persist: true,
-            preferredModule: match.moduleID
-        )
+    }
+
+    private func moveCommandSelection(by delta: Int) {
+        let count = currentActionMatches.count
+        guard count > 0 else {
+            shellSelectionIndex = 0
+            return
+        }
+        shellSelectionIndex = (shellSelectionIndex + delta + count) % count
+    }
+
+    private func executeSelectedHopAction() {
+        let matches = currentActionMatches
+        guard !matches.isEmpty else { return }
+        let index = min(max(shellSelectionIndex, 0), matches.count - 1)
+        executeHopAction(matches[index])
+    }
+
+    private func executeHopAction(_ action: HopAction) {
+        model.activity.note()
+        shellQuery = ""
+        shellSelectionIndex = 0
         shellSearchFocused = false
+
+        switch action.id {
+        case "capture.screenshotToolbar":
+            closePanelThen { openNativeScreenshotToolbar() }
+
+        case "capture.area":
+            closePanelThen { model.shot.capture(.area) }
+
+        case "capture.ocr":
+            closePanelThen { model.screenText.capture() }
+
+        case "capture.markup":
+            closePanelThen { model.annotate.toggle() }
+
+        case "window.minimize":
+            closePanelThen { WindowSnapController.shared.minimizeCurrentWindow() }
+
+        case "window.maximize":
+            closePanelThen { WindowSnapController.shared.apply(.maximize) }
+
+        case "window.leftHalf":
+            closePanelThen { WindowSnapController.shared.apply(.leftHalf) }
+
+        case "window.rightHalf":
+            closePanelThen { WindowSnapController.shared.apply(.rightHalf) }
+
+        case "focus.timer25":
+            model.engine.setPreset(minutes: 25)
+            model.engine.start()
+            selectHopSpace(.work, persist: true, preferredModule: "timer")
+
+        case "focus.timerToggle":
+            model.engine.toggle()
+            selectHopSpace(.work, persist: true, preferredModule: "timer")
+
+        case "network.protonVPN":
+            closePanelThen {
+                if !model.vpn.openProtonVPN() {
+                    model.reopenPanel?(.spaceContaining("vpn"))
+                }
+            }
+
+        case "navigate.system":
+            selectHopSpace(.mac, persist: true, preferredModule: "system")
+
+        case "navigate.clipboard":
+            selectHopSpace(.work, persist: true, preferredModule: "clipboard")
+
+        case "navigate.todos":
+            selectHopSpace(.work, persist: true, preferredModule: "todos")
+
+        case "files.convert":
+            closePanelThen { model.openConverterWindow?() }
+
+        case "files.archive":
+            closePanelThen { model.openArchiveWindow?() }
+
+        case "files.uninstall":
+            closePanelThen { model.openUninstallWindow?() }
+
+        default:
+            break
+        }
+    }
+
+    private func closePanelThen(_ action: @escaping @MainActor () -> Void) {
+        model.closePanel?()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+            action()
+        }
+    }
+
+    private func openNativeScreenshotToolbar() {
+        let appURL = URL(fileURLWithPath: "/System/Applications/Utilities/Screenshot.app")
+        if FileManager.default.fileExists(atPath: appURL.path) {
+            let options = NSWorkspace.OpenConfiguration()
+            options.activates = true
+            NSWorkspace.shared.openApplication(at: appURL, configuration: options)
+            return
+        }
+
+        // Fallback for a future macOS path move: LaunchServices can resolve the
+        // system app by name without shell interpolation.
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        process.arguments = ["-a", "Screenshot"]
+        try? process.run()
     }
 
     /// The three window modules, in the order the row shows them. The
