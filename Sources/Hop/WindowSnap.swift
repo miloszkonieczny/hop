@@ -59,6 +59,28 @@ final class WindowSnapController {
         }
     }
 
+    func minimizeCurrentWindow() {
+        guard AXIsProcessTrusted() else {
+            AccessibilityWatch.shared.reportBlocked()
+            PermissionRepair.askAgain(.accessibility)
+            return
+        }
+        guard let pid = lastExternalPID else { return }
+        let appElement = AXUIElementCreateApplication(pid)
+        var windowRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            appElement, kAXFocusedWindowAttribute as CFString, &windowRef
+        ) == .success,
+            let windowRef, CFGetTypeID(windowRef) == AXUIElementGetTypeID()
+        else { return }
+
+        AXUIElementSetAttributeValue(
+            windowRef as! AXUIElement,
+            kAXMinimizedAttribute as CFString,
+            kCFBooleanTrue
+        )
+    }
+
     func apply(_ position: Position) {
         guard AXIsProcessTrusted() else {
             // A zone is used with the panel shut, so a bare `return` is a window
