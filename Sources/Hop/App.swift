@@ -1150,9 +1150,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         LaunchGuard.markStable()
-        // A deliberate clean quit before the 30-second timer is also considered
-        // stable by LaunchGuard, so it must commit an update transaction too.
-        UpdateRollbackGuard.acknowledgeStableLaunchIfRequested()
+        // A clean quit before the updater's 30-second stability window should
+        // preserve user intent (stay quit) without committing an unproven
+        // replacement. The rollback guard restores the old version but does not
+        // relaunch it.
+        UpdateRollbackGuard.recordCleanExitIfRequested()
         // Kill the torrent engine on a clean quit: rqbit is a child process that
         // would otherwise be reparented to launchd and keep holding its fixed
         // DHT/peer ports, so the NEXT launch could not start its own engine.
