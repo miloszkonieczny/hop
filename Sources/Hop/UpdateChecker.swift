@@ -299,10 +299,14 @@ final class UpdateChecker: ObservableObject {
 
             guard try run("/usr/bin/ditto", ["-xk", tempZip.path, staging.path]) == 0
             else { throw URLError(.cannotParseResponse) }
-            guard let appName = try FileManager.default.contentsOfDirectory(atPath: staging.path)
-                .first(where: { $0.hasSuffix(".app") }),
-                  appName == "Hop.app"
-            else { throw URLError(.cannotParseResponse) }
+            let apps = try FileManager.default.contentsOfDirectory(atPath: staging.path)
+                .filter { $0.hasSuffix(".app") }
+            guard apps == ["Hop.app"] else {
+                // A release archive has one application bundle, with the
+                // canonical name. Ambiguous/multi-app archives fail closed.
+                throw URLError(.cannotParseResponse)
+            }
+            let appName = apps[0]
             let newApp = staging.appendingPathComponent(appName)
             try validateUpdateBundle(newApp, info: info)
 
