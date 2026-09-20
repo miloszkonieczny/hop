@@ -53,7 +53,7 @@ final class ClipboardSecretDetectorTests: XCTestCase {
 
     func testAuthorizationHeadersAreSensitive() {
         let bearer = "Authorization: " + "Bearer " + "AbCdEf0123456789.AbCdEf0123456789"
-        let basicPayload = "QWxh" + "ZGRpbjpvcGVu" + "U2VzYW1l" + "MTIz"
+        let basicPayload = "QWxh" + "ZGRpbjpvcGVu" + "U2VzYW1l" + "12"
         let basic = "authorization: " + "basic " + basicPayload
         XCTAssertTrue(ClipboardSecretDetector.containsSecret(bearer))
         XCTAssertTrue(ClipboardSecretDetector.containsSecret(basic))
