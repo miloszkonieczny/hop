@@ -53,7 +53,8 @@ final class ClipboardSecretDetectorTests: XCTestCase {
 
     func testAuthorizationHeadersAreSensitive() {
         let bearer = "Authorization: " + "Bearer " + "AbCdEf0123456789.AbCdEf0123456789"
-        let basic = "authorization: " + "basic " + repeated("Q", 24)
+        let basicPayload = "QWxh" + "ZGRpbjpvcGVu" + "U2VzYW1l" + "MTIz"
+        let basic = "authorization: " + "basic " + basicPayload
         XCTAssertTrue(ClipboardSecretDetector.containsSecret(bearer))
         XCTAssertTrue(ClipboardSecretDetector.containsSecret(basic))
     }
@@ -64,6 +65,8 @@ final class ClipboardSecretDetectorTests: XCTestCase {
             "client_secret: " + "AbCdEf0123456789_-ZYXW",
             "\"aws_secret_access_key\": \"" + "AbCdEf0123456789+/AbCdEf0123456789+" + "\"",
             "PASSWORD='" + "Correct-Horse-7-Battery-Staple!" + "'",
+            "CLOUDFLARE_API_TOKEN=" + "AbCdEf0123456789_-ZYXW987654",
+            "service_role_key: " + "AbCdEf0123456789_-ServiceRole",
         ]
         for value in values {
             XCTAssertTrue(ClipboardSecretDetector.containsSecret(value))
