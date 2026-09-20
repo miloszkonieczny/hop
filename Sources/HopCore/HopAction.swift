@@ -15,6 +15,29 @@ public struct HopAction: Identifiable, Equatable, Hashable, Sendable {
         case navigate
     }
 
+    /// Typed bridge into the macOS app layer. PanelView switches this enum
+    /// exhaustively, so adding a new execution kind cannot compile until the
+    /// real behavior is implemented.
+    public enum Execution: String, CaseIterable, Hashable, Sendable {
+        case screenshotToolbar
+        case captureArea
+        case ocrScreen
+        case drawOnScreen
+        case minimizeWindow
+        case maximizeWindow
+        case moveWindowLeft
+        case moveWindowRight
+        case startTimer25
+        case toggleTimer
+        case openProtonVPN
+        case showSystemMonitor
+        case openConverter
+        case openArchive
+        case openUninstaller
+        case showClipboard
+        case showTodos
+    }
+
     public let id: String
     public let title: String
     public let subtitle: String
@@ -23,6 +46,7 @@ public struct HopAction: Identifiable, Equatable, Hashable, Sendable {
     public let space: HopSpace
     public let systemImage: String
     public let requiredModuleID: String?
+    public let execution: Execution
 
     public init(
         id: String,
@@ -32,7 +56,8 @@ public struct HopAction: Identifiable, Equatable, Hashable, Sendable {
         category: Category,
         space: HopSpace,
         systemImage: String,
-        requiredModuleID: String? = nil
+        requiredModuleID: String? = nil,
+        execution: Execution
     ) {
         self.id = id
         self.title = title
@@ -42,6 +67,7 @@ public struct HopAction: Identifiable, Equatable, Hashable, Sendable {
         self.space = space
         self.systemImage = systemImage
         self.requiredModuleID = requiredModuleID
+        self.execution = execution
     }
 }
 
@@ -55,7 +81,8 @@ public enum HopActionCatalog {
             category: .capture,
             space: .tools,
             systemImage: "camera.viewfinder",
-            requiredModuleID: "shot"
+            requiredModuleID: "shot",
+            execution: .screenshotToolbar
         ),
         HopAction(
             id: "capture.area",
@@ -65,7 +92,8 @@ public enum HopActionCatalog {
             category: .capture,
             space: .tools,
             systemImage: "viewfinder",
-            requiredModuleID: "shot"
+            requiredModuleID: "shot",
+            execution: .captureArea
         ),
         HopAction(
             id: "capture.ocr",
@@ -75,7 +103,8 @@ public enum HopActionCatalog {
             category: .capture,
             space: .tools,
             systemImage: "text.viewfinder",
-            requiredModuleID: "ocr"
+            requiredModuleID: "ocr",
+            execution: .ocrScreen
         ),
         HopAction(
             id: "capture.markup",
@@ -85,7 +114,8 @@ public enum HopActionCatalog {
             category: .capture,
             space: .tools,
             systemImage: "pencil.tip.crop.circle",
-            requiredModuleID: "annotate"
+            requiredModuleID: "annotate",
+            execution: .drawOnScreen
         ),
 
         HopAction(
@@ -96,7 +126,8 @@ public enum HopActionCatalog {
             category: .windows,
             space: .tools,
             systemImage: "minus.rectangle",
-            requiredModuleID: "windows"
+            requiredModuleID: "windows",
+            execution: .minimizeWindow
         ),
         HopAction(
             id: "window.maximize",
@@ -106,7 +137,8 @@ public enum HopActionCatalog {
             category: .windows,
             space: .tools,
             systemImage: "rectangle.inset.filled",
-            requiredModuleID: "windows"
+            requiredModuleID: "windows",
+            execution: .maximizeWindow
         ),
         HopAction(
             id: "window.leftHalf",
@@ -116,7 +148,8 @@ public enum HopActionCatalog {
             category: .windows,
             space: .tools,
             systemImage: "rectangle.lefthalf.inset.filled",
-            requiredModuleID: "windows"
+            requiredModuleID: "windows",
+            execution: .moveWindowLeft
         ),
         HopAction(
             id: "window.rightHalf",
@@ -126,7 +159,8 @@ public enum HopActionCatalog {
             category: .windows,
             space: .tools,
             systemImage: "rectangle.righthalf.inset.filled",
-            requiredModuleID: "windows"
+            requiredModuleID: "windows",
+            execution: .moveWindowRight
         ),
 
         HopAction(
@@ -137,7 +171,8 @@ public enum HopActionCatalog {
             category: .focus,
             space: .work,
             systemImage: "timer",
-            requiredModuleID: "timer"
+            requiredModuleID: "timer",
+            execution: .startTimer25
         ),
         HopAction(
             id: "focus.timerToggle",
@@ -147,7 +182,8 @@ public enum HopActionCatalog {
             category: .focus,
             space: .work,
             systemImage: "playpause",
-            requiredModuleID: "timer"
+            requiredModuleID: "timer",
+            execution: .toggleTimer
         ),
 
         HopAction(
@@ -158,7 +194,8 @@ public enum HopActionCatalog {
             category: .network,
             space: .mac,
             systemImage: "lock.shield",
-            requiredModuleID: "vpn"
+            requiredModuleID: "vpn",
+            execution: .openProtonVPN
         ),
         HopAction(
             id: "navigate.system",
@@ -168,7 +205,8 @@ public enum HopActionCatalog {
             category: .navigate,
             space: .mac,
             systemImage: "gauge.with.dots.needle.50percent",
-            requiredModuleID: "system"
+            requiredModuleID: "system",
+            execution: .showSystemMonitor
         ),
 
         HopAction(
@@ -179,7 +217,8 @@ public enum HopActionCatalog {
             category: .files,
             space: .tools,
             systemImage: "arrow.triangle.2.circlepath.doc.on.clipboard",
-            requiredModuleID: "convert"
+            requiredModuleID: "convert",
+            execution: .openConverter
         ),
         HopAction(
             id: "files.archive",
@@ -189,7 +228,8 @@ public enum HopActionCatalog {
             category: .files,
             space: .tools,
             systemImage: "archivebox",
-            requiredModuleID: "archive"
+            requiredModuleID: "archive",
+            execution: .openArchive
         ),
         HopAction(
             id: "files.uninstall",
@@ -199,7 +239,8 @@ public enum HopActionCatalog {
             category: .files,
             space: .tools,
             systemImage: "trash.slash",
-            requiredModuleID: "uninstall"
+            requiredModuleID: "uninstall",
+            execution: .openUninstaller
         ),
 
         HopAction(
@@ -210,7 +251,8 @@ public enum HopActionCatalog {
             category: .navigate,
             space: .work,
             systemImage: "doc.on.clipboard",
-            requiredModuleID: "clipboard"
+            requiredModuleID: "clipboard",
+            execution: .showClipboard
         ),
         HopAction(
             id: "navigate.todos",
@@ -220,7 +262,8 @@ public enum HopActionCatalog {
             category: .navigate,
             space: .work,
             systemImage: "checklist",
-            requiredModuleID: "todos"
+            requiredModuleID: "todos",
+            execution: .showTodos
         ),
     ]
 
