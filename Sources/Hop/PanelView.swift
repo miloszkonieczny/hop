@@ -1617,6 +1617,23 @@ struct PanelView: View {
                         .foregroundStyle(Theme.textPrimary)
                         .focused($shellSearchFocused)
                         .onSubmit { executeSelectedHopAction() }
+                        .onKeyPress(.downArrow) {
+                            moveCommandSelection(by: 1)
+                            return .handled
+                        }
+                        .onKeyPress(.upArrow) {
+                            moveCommandSelection(by: -1)
+                            return .handled
+                        }
+                        .onKeyPress(.escape) {
+                            if shellQuery.isEmpty {
+                                shellSearchFocused = false
+                            } else {
+                                shellQuery = ""
+                                shellSelectionIndex = 0
+                            }
+                            return .handled
+                        }
                 }
                 .padding(.horizontal, 9)
                 .frame(height: 30)
@@ -3250,7 +3267,7 @@ struct PanelView: View {
         }
     }
 
-    private func closePanelThen(_ action: @escaping @MainActor () -> Void) {
+    private func closePanelThen(_ action: @escaping () -> Void) {
         model.closePanel?()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
             action()
@@ -3262,7 +3279,10 @@ struct PanelView: View {
         if FileManager.default.fileExists(atPath: appURL.path) {
             let options = NSWorkspace.OpenConfiguration()
             options.activates = true
-            NSWorkspace.shared.openApplication(at: appURL, configuration: options)
+            NSWorkspace.shared.openApplication(
+                at: appURL,
+                configuration: options
+            ) { _, _ in }
             return
         }
 
