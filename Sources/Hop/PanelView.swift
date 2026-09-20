@@ -1619,22 +1619,25 @@ struct PanelView: View {
                         .foregroundStyle(Theme.textPrimary)
                         .focused($shellSearchFocused)
                         .onSubmit { executeSelectedHopAction() }
-                        .onKeyPress(.downArrow) {
-                            moveCommandSelection(by: 1)
-                            return .handled
-                        }
-                        .onKeyPress(.upArrow) {
-                            moveCommandSelection(by: -1)
-                            return .handled
-                        }
-                        .onKeyPress(.escape) {
-                            if shellQuery.isEmpty {
-                                shellSearchFocused = false
-                            } else {
-                                shellQuery = ""
-                                shellSelectionIndex = 0
+                        .onKeyPress { press in
+                            switch press.key {
+                            case .downArrow:
+                                moveCommandSelection(by: 1)
+                                return .handled
+                            case .upArrow:
+                                moveCommandSelection(by: -1)
+                                return .handled
+                            case .escape:
+                                if shellQuery.isEmpty {
+                                    shellSearchFocused = false
+                                } else {
+                                    shellQuery = ""
+                                    shellSelectionIndex = 0
+                                }
+                                return .handled
+                            default:
+                                return .ignored
                             }
-                            return .handled
                         }
                 }
                 .padding(.horizontal, 9)
