@@ -3208,67 +3208,64 @@ struct PanelView: View {
         shellSelectionIndex = 0
         shellSearchFocused = false
 
-        switch action.id {
-        case "capture.screenshotToolbar":
+        switch action.execution {
+        case .screenshotToolbar:
             closePanelThen { openNativeScreenshotToolbar() }
 
-        case "capture.area":
+        case .captureArea:
             closePanelThen { model.shot.capture(.area) }
 
-        case "capture.ocr":
+        case .ocrScreen:
             closePanelThen { model.screenText.capture() }
 
-        case "capture.markup":
+        case .drawOnScreen:
             closePanelThen { model.annotate.toggle() }
 
-        case "window.minimize":
+        case .minimizeWindow:
             closePanelThen { WindowSnapController.shared.minimizeCurrentWindow() }
 
-        case "window.maximize":
+        case .maximizeWindow:
             closePanelThen { WindowSnapController.shared.apply(.maximize) }
 
-        case "window.leftHalf":
+        case .moveWindowLeft:
             closePanelThen { WindowSnapController.shared.apply(.leftHalf) }
 
-        case "window.rightHalf":
+        case .moveWindowRight:
             closePanelThen { WindowSnapController.shared.apply(.rightHalf) }
 
-        case "focus.timer25":
+        case .startTimer25:
             model.engine.setPreset(minutes: 25)
             model.engine.start()
             selectHopSpace(.work, persist: true, preferredModule: "timer")
 
-        case "focus.timerToggle":
+        case .toggleTimer:
             model.engine.toggle()
             selectHopSpace(.work, persist: true, preferredModule: "timer")
 
-        case "network.protonVPN":
+        case .openProtonVPN:
             closePanelThen {
                 if !model.vpn.openProtonVPN() {
                     model.reopenPanel?(.spaceContaining("vpn"))
                 }
             }
 
-        case "navigate.system":
+        case .showSystemMonitor:
             selectHopSpace(.mac, persist: true, preferredModule: "system")
 
-        case "navigate.clipboard":
+        case .showClipboard:
             selectHopSpace(.work, persist: true, preferredModule: "clipboard")
 
-        case "navigate.todos":
+        case .showTodos:
             selectHopSpace(.work, persist: true, preferredModule: "todos")
 
-        case "files.convert":
+        case .openConverter:
             closePanelThen { model.openConverterWindow?() }
 
-        case "files.archive":
+        case .openArchive:
             closePanelThen { model.openArchiveWindow?() }
 
-        case "files.uninstall":
+        case .openUninstaller:
             closePanelThen { model.openUninstallWindow?() }
-
-        default:
-            break
         }
     }
 
