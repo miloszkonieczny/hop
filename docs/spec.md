@@ -6278,6 +6278,13 @@ opened" dialog and the Privacy & Security override.
   points to, runs `spctl` over it and validates the stapled ticket, on the app
   and on the landing DMG. A build that is signed but not notarised passes every
   other check and is still blocked on a first install.
+- Before the updater removes quarantine or touches the installed app, the
+  extracted bundle must pass a strict `codesign` verification against an explicit
+  Developer ID requirement: Apple-issued Developer ID Application code for
+  `com.antonshakirov.minimo`, Team ID `8GL36WUJPX`. Archive-level Ed25519
+  verification alone is not enough. An ad-hoc build, an Apple Development build,
+  another team's build, or a damaged signature fails closed and the update is not
+  installed.
 - The updater installs with `ditto`, not `copyItem`: it carries a bundle across
   whole, and a bundle that arrives intact keeps both the signature the permission
   hangs on and the stapled ticket.

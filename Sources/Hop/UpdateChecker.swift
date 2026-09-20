@@ -321,8 +321,20 @@ final class UpdateChecker: ObservableObject {
                   )
             else { throw URLError(.cannotParseResponse) }
 
-            // quarantine is removed ONLY after both authenticity and artifact
-            // identity have been proven.
+            // The archive signature is not the only trust root: the extracted
+            // bundle must also be valid Apple-signed Hop code from the expected
+            // Developer ID team. This rejects ad-hoc, development-signed, broken,
+            // or differently signed bundles even if somebody obtained the
+            // Ed25519 release key. Check this before removing quarantine.
+            guard try run(
+                "/usr/bin/codesign",
+                UpdateCodeSignaturePolicy.verificationArguments(appPath: newApp.path)
+            ) == 0 else {
+                throw URLError(.cannotParseResponse)
+            }
+
+            // quarantine is removed ONLY after archive authenticity, artifact
+            // identity and Apple distribution identity have all been proven.
             _ = try? run("/usr/bin/xattr", ["-dr", "com.apple.quarantine", newApp.path])
 
             let target = "/Applications/\(appName)"
