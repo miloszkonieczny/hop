@@ -166,9 +166,14 @@ public enum UpdateRollbackProtocol {
         guard acknowledgement.lastPathComponent == "launch-stable" else { return false }
 
         let state = acknowledgement.deletingLastPathComponent()
-        guard state.lastPathComponent.hasPrefix("hop-update-transaction-") else {
-            return false
-        }
+        let prefix = "hop-update-transaction-"
+        let stateName = state.lastPathComponent
+        guard stateName.hasPrefix(prefix) else { return false }
+        let transactionID = String(stateName.dropFirst(prefix.count))
+        guard !transactionID.isEmpty,
+              !transactionID.contains("/"),
+              !transactionID.contains("..")
+        else { return false }
         return state.deletingLastPathComponent().path == standardized(cacheDirectory)
     }
 
