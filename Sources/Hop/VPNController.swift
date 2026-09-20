@@ -383,7 +383,10 @@ final class VPNController: ObservableObject {
             }) {
                 let options = NSWorkspace.OpenConfiguration()
                 options.activates = true
-                NSWorkspace.shared.openApplication(at: proton, configuration: options)
+                NSWorkspace.shared.openApplication(
+                    at: proton,
+                    configuration: options
+                ) { _, _ in }
                 return true
             }
         }
