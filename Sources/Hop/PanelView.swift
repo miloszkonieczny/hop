@@ -1571,7 +1571,7 @@ struct PanelView: View {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 11))
                         .foregroundStyle(Theme.textTertiary)
-                    TextField("Search actions…", text: $shellQuery)
+                    TextField("Find tools…", text: $shellQuery)
                         .textFieldStyle(.plain)
                         .font(Theme.mono(11))
                         .foregroundStyle(Theme.textPrimary)
@@ -3132,52 +3132,14 @@ struct PanelView: View {
     /// and switching the setting back changes nothing else.
     private static let toolsRowKey = "tools:row"
 
-    /// The module list as it is DRAWN. With `toolsOneRow` on, the first of the
-    /// three tools becomes the combined row and the others disappear from the
-    /// list; with it off, nothing changes.
-    private func collapsedModules(_ modules: [String]) -> [String] {
-        guard toolsOneRow else { return modules }
-        let present = modules.filter { Self.toolModules.contains($0) }
-        guard present.count > 1 else { return modules }
-        var replaced = false
-        return modules.compactMap { key in
-            guard Self.toolModules.contains(key) else { return key }
-            guard !replaced else { return nil }
-            replaced = true
-            return Self.toolsRowKey
-        }
-    }
-
     /// Which tools the collapsed row offers, in the semantic shell's order.
     /// The source tab no longer limits this row: convert/archive may have lived
     /// on different legacy tabs, but Tools presents them as one semantic group.
-    private func toolsInRow(_ id: UUID) -> [ToolsRowView.Tool] {
+    private func toolsInRow(_: UUID) -> [ToolsRowView.Tool] {
         visiblePlacements(in: hopSpace)
             .map(\.moduleID)
             .filter { Self.toolModules.contains($0) }
             .compactMap { ToolsRowView.Tool(rawValue: $0) }
-    }
-
-    private func visibleModules(in id: UUID) -> [String] {
-        (tabsModel.tabs.first { $0.id == id }?.moduleKeys ?? [])
-            .filter { moduleVisible($0) }
-    }
-
-    /// The space id to actually render and highlight for a stored `screen` id.
-    /// The panel is built once at launch and `screen` only resolves in `init`,
-    /// so a space deleted meanwhile (from the standalone settings window, a
-    /// separate PanelView instance) leaves a dead id in this instance's state.
-    /// Derive the live id at every read site — do NOT mutate `@State` in body —
-    /// so the rendered content and the tab highlight always agree. `tabs` is
-    /// never empty (the model guarantees 1...maxTabs), so `tabs[0]` is safe.
-    private func effectiveSpaceID(_ id: UUID) -> UUID {
-        tabsModel.tabs.contains { $0.id == id } ? id : tabsModel.tabs[0].id
-    }
-
-    /// The live space currently shown, or nil when the panel isn't on a space.
-    private var currentSpaceID: UUID? {
-        if case .space(let id) = screen { return effectiveSpaceID(id) }
-        return nil
     }
 
     /// The rule itself lives in HopCore so it can be tested; see
