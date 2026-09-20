@@ -64,6 +64,7 @@ final class UpdateChecker: ObservableObject {
 
     init() {
         Self.cleanupStagingLeftovers()
+        Self.cleanupResolvedReplacementTransactions()
     }
 
     /// Installs stage the new bundle into temporaryDirectory/hop-update-<UUID>,
@@ -76,6 +77,48 @@ final class UpdateChecker: ObservableObject {
         guard let entries = try? fm.contentsOfDirectory(atPath: tmp.path) else { return }
         for name in entries where name.hasPrefix("hop-update-") {
             try? fm.removeItem(at: tmp.appendingPathComponent(name))
+        }
+    }
+
+    /// Recover only transaction leftovers whose state is unambiguous:
+    /// - launch-stable exists: the replacement committed, old rollback is disposable;
+    /// - guard-ready is absent: the parent never reached the atomic swap gate, so
+    ///   rollbackPath can only be the not-yet-installed candidate.
+    ///
+    /// A ready-but-unacknowledged transaction is NEVER guessed at. It may be an
+    /// active guard or the sole recovery copy after an interrupted rollback.
+    private static func cleanupResolvedReplacementTransactions() {
+        let fm = FileManager.default
+        guard let caches = fm.urls(for: .cachesDirectory, in: .userDomainMask).first else {
+            return
+        }
+        let cacheRoot = caches.appendingPathComponent(
+            UpdateCodeSignaturePolicy.expectedBundleIdentifier,
+            isDirectory: true
+        )
+        guard let entries = try? fm.contentsOfDirectory(atPath: cacheRoot.path) else {
+            return
+        }
+
+        let prefix = "hop-update-transaction-"
+        for name in entries where name.hasPrefix(prefix) {
+            let transactionID = String(name.dropFirst(prefix.count))
+            guard !transactionID.isEmpty,
+                  !transactionID.contains("/"),
+                  !transactionID.contains("..")
+            else { continue }
+
+            let plan = UpdateReplacementPlan(
+                targetPath: "/Applications/Hop.app",
+                cacheDirectory: cacheRoot.path,
+                transactionID: transactionID
+            )
+            let committed = fm.fileExists(atPath: plan.stableAcknowledgementPath)
+            let guardStarted = fm.fileExists(atPath: plan.guardReadyPath)
+            guard committed || !guardStarted else { continue }
+
+            try? fm.removeItem(atPath: plan.rollbackPath)
+            try? fm.removeItem(atPath: plan.stateDirectory)
         }
     }
 
