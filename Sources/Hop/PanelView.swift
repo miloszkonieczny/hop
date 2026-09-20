@@ -1175,44 +1175,16 @@ struct PanelView: View {
         }
     }
 
-    /// The body of the active screen — the space's module stack, or the
-    /// settings/about overlay content. This is the ONLY part that scrolls.
+    /// The body of the compact semantic shell. The old `PanelTabsModel`
+    /// remains untouched underneath: each placement carries the legacy source
+    /// tab id back into `moduleBlock`, so module settings/actions keep the same
+    /// storage identity while Work / Mac / Tools controls presentation.
     private var panelContent: some View {
         VStack(spacing: 16) {
-            switch screen {
-            case .space(let rawID):
-                // resolve a possibly-dead id (its space may have been deleted
-                // from the settings window since this panel was built)
-                let id = effectiveSpaceID(rawID)
-                let modules = visibleModules(in: id)
-                if modules.isEmpty {
-                    Text(t(.tabEmptyHint))
-                        .font(Theme.mono(11))
-                        .foregroundStyle(Theme.textTertiary)
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 28)
-                } else {
-                    // a stack of the space's modules in order. Inner spacing equals
-                    // the outer one (16): the divider sits exactly midway between
-                    // modules, with equal space above and below
-                    // With the setting on, the three window modules are drawn as
-                    // ONE row where the first of them sits, and the other two drop
-                    // out of the list — see `collapsedModules`.
-                    let rendered = collapsedModules(modules)
-                    ForEach(Array(rendered.enumerated()), id: \.element) { index, key in
-                        if index == 0 {
-                            moduleBlock(key, in: id)
-                        } else {
-                            VStack(spacing: 16) {
-                                Rectangle()
-                                    .fill(Theme.divider)
-                                    .frame(height: 1)
-                                moduleBlock(key, in: id)
-                            }
-                        }
-                    }
-                }
+            if shellQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                shellSpaceContent
+            } else {
+                shellSearchResults
             }
         }
         .padding(.horizontal, 14)
@@ -1220,11 +1192,92 @@ struct PanelView: View {
         .frame(width: 368)
     }
 
-    /// Fresh ScrollView identity per screen so switching always starts at the top.
-    private var scrollResetKey: String {
-        switch screen {
-        case .space(let id): return "space:\(effectiveSpaceID(id).uuidString)"
+    @ViewBuilder private var shellSpaceContent: some View {
+        let placements = collapsedPlacements(visiblePlacements(in: hopSpace))
+        if placements.isEmpty {
+            Text(t(.tabEmptyHint))
+                .font(Theme.mono(11))
+                .foregroundStyle(Theme.textTertiary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 28)
+        } else {
+            ForEach(Array(placements.enumerated()), id: \.element.id) { index, placement in
+                if index == 0 {
+                    moduleBlock(placement.moduleID, in: placement.sourceTabID)
+                } else {
+                    VStack(spacing: 16) {
+                        Rectangle()
+                            .fill(Theme.divider)
+                            .frame(height: 1)
+                        moduleBlock(placement.moduleID, in: placement.sourceTabID)
+                    }
+                }
+            }
         }
+    }
+
+    /// Stage-one search is intentionally navigation-only: it finds existing
+    /// modules and moves to their semantic space. PR #6 will replace this with
+    /// executable `HopAction` results. Shipping a dead search field would be
+    /// worse than shipping this small but real behavior.
+    private var shellSearchResults: some View {
+        let query = shellQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let matches = allVisiblePlacements.filter { placement in
+            let title = moduleTitle(placement.moduleID).lowercased()
+            return title.contains(query) || placement.moduleID.lowercased().contains(query)
+        }
+        return VStack(spacing: 6) {
+            if matches.isEmpty {
+                Text("No matching tools")
+                    .font(Theme.mono(11))
+                    .foregroundStyle(Theme.textTertiary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 24)
+            } else {
+                ForEach(matches.prefix(8)) { placement in
+                    let destination = HopSpace.containing(module: placement.moduleID)
+                    Button {
+                        selectHopSpace(destination, persist: true)
+                        shellQuery = ""
+                        shellSearchFocused = false
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: destination.systemImage)
+                                .font(.system(size: 11))
+                                .foregroundStyle(Theme.textTertiary)
+                                .frame(width: 18)
+                            Text(moduleTitle(placement.moduleID))
+                                .font(Theme.mono(11))
+                                .foregroundStyle(Theme.textPrimary)
+                                .lineLimit(1)
+                            Spacer(minLength: 8)
+                            Text(destination.title)
+                                .font(Theme.mono(9))
+                                .foregroundStyle(Theme.textTertiary)
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 8, weight: .semibold))
+                                .foregroundStyle(Theme.textTertiary)
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .background(Theme.rowBg, in: RoundedRectangle(cornerRadius: 7))
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .hoverHighlight(7)
+                }
+            }
+        }
+    }
+
+    /// A fresh ScrollView identity per semantic space/query makes every switch
+    /// start at the top while the fixed chrome stays pixel-stable.
+    private var scrollResetKey: String {
+        if shellQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "hop-space:\(hopSpace.rawValue)"
+        }
+        return "hop-search:\(shellQuery)"
     }
 
     private var chromeHeightReader: some View {
@@ -1497,18 +1550,69 @@ struct PanelView: View {
 
     // MARK: - Header
 
+    /// Compact fixed shell: real module navigation now has one stable place
+    /// instead of exposing the legacy user-tab implementation directly.
     private var header: some View {
-        HStack(spacing: 8) {
-            if tabsModel.tabs.count > 1 { tabSwitcher }
-            Spacer()
-            headerIcon("gearshape", help: t(.settingsTitle)) {
-                model.openSettingsWindow?()
+        VStack(spacing: 8) {
+            HStack(spacing: 8) {
+                HStack(spacing: 7) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.textTertiary)
+                    TextField("Search actions…", text: $shellQuery)
+                        .textFieldStyle(.plain)
+                        .font(Theme.mono(11))
+                        .foregroundStyle(Theme.textPrimary)
+                        .focused($shellSearchFocused)
+                        .onSubmit { openSingleShellSearchMatch() }
+                }
+                .padding(.horizontal, 9)
+                .frame(height: 30)
+                .background(Theme.rowBg, in: RoundedRectangle(cornerRadius: 7))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 7)
+                        .stroke(shellSearchFocused ? Theme.textTertiary.opacity(0.55) : Theme.divider,
+                                lineWidth: 1)
+                )
+
+                headerIcon("gearshape", help: t(.settingsTitle)) {
+                    model.openSettingsWindow?()
+                }
+                headerIcon("power", help: t(.menuQuit)) {
+                    model.requestQuit?()
+                }
             }
-            headerIcon("power", help: t(.menuQuit)) {
-                model.requestQuit?()
+            hopSpaceSwitcher
+        }
+    }
+
+    private var hopSpaceSwitcher: some View {
+        HStack(spacing: 2) {
+            ForEach(HopSpace.allCases, id: \.rawValue) { space in
+                Button {
+                    selectHopSpace(space, persist: true)
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: space.systemImage)
+                            .font(.system(size: 11))
+                        Text(space.title)
+                            .font(Theme.mono(10, weight: .semibold))
+                    }
+                    .foregroundStyle(hopSpace == space ? Theme.textPrimary : Theme.textTertiary)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 28)
+                    .background(
+                        hopSpace == space ? Theme.chipBg : Color.clear,
+                        in: RoundedRectangle(cornerRadius: 6)
+                    )
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .hoverHighlight(6)
             }
         }
-        .frame(height: 34)
+        .padding(2)
+        .overlay(RoundedRectangle(cornerRadius: 7).stroke(Theme.divider, lineWidth: 1))
     }
 
     /// Every icon in the header carries its name on hover: an icon alone is a
