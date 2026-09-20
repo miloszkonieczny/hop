@@ -235,4 +235,40 @@ final class ClipboardRulesTests: XCTestCase {
         XCTAssertNil(ClipboardRules.remembering(color: "", text: "#336699", in: []))
         XCTAssertNil(ClipboardRules.remembering(color: "336699", text: "", in: []))
     }
+    // MARK: - secret persistence protection
+
+    func testSecretTextNeverEntersHistory() {
+        let token = "gsk" + "_" + String(repeating: "a", count: 36)
+        let items = [item("existing")]
+
+        XCTAssertNil(ClipboardRules.remembering(token, in: items))
+    }
+
+    func testOrdinaryDeveloperTextStillEntersHistory() {
+        let text = "export API_BASE_URL=https://api.example.com"
+        let out = ClipboardRules.remembering(text, in: [])
+
+        XCTAssertEqual(out?.first?.text, text)
+    }
+
+    func testRemovingSecretsScrubsOnlyPlainTextEntries() {
+        let secret = "gh" + "p_" + String(repeating: "b", count: 32)
+        let plainSecret = ClipboardItem(text: secret)
+        let ordinary = ClipboardItem(text: "normal text")
+        let fileNamedLikeSecret = ClipboardItem(
+            text: secret,
+            filePaths: ["/tmp/\(secret)"]
+        )
+        let color = ClipboardItem(text: "#336699", colorHex: "336699")
+        let image = ClipboardItem(text: secret, imageFile: "image.png")
+
+        let kept = ClipboardRules.removingSecrets(from: [
+            plainSecret, ordinary, fileNamedLikeSecret, color, image,
+        ])
+
+        XCTAssertEqual(kept.map(\.id), [
+            ordinary.id, fileNamedLikeSecret.id, color.id, image.id,
+        ])
+    }
+
 }
