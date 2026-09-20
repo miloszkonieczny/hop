@@ -6,7 +6,7 @@ import Foundation
 /// ordering and availability metadata, which keeps ranking deterministic and
 /// unit-testable.
 public struct HopAction: Identifiable, Equatable, Hashable, Sendable {
-    public enum Category: String, Sendable {
+    public enum Category: String, Hashable, Sendable {
         case focus
         case capture
         case windows
