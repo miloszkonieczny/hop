@@ -227,13 +227,30 @@ public enum HopActionCatalog {
     /// Deterministic ranking. Every query token must match somewhere. Exact
     /// title/keyword matches beat prefixes, which beat word prefixes, which beat
     /// plain containment. Catalog order is the final tie-breaker.
+    private static let suggestedIDs = [
+        "capture.screenshotToolbar",
+        "capture.area",
+        "capture.ocr",
+        "network.protonVPN",
+        "window.minimize",
+        "focus.timer25",
+        "capture.markup",
+        "files.convert",
+    ]
+
     public static func search(
         _ query: String,
         in actions: [HopAction] = all,
         limit: Int = 8
     ) -> [HopAction] {
         let normalizedQuery = normalize(query)
-        guard !normalizedQuery.isEmpty else { return Array(actions.prefix(limit)) }
+        if normalizedQuery.isEmpty {
+            let byID = Dictionary(uniqueKeysWithValues: actions.map { ($0.id, $0) })
+            let suggested = suggestedIDs.compactMap { byID[$0] }
+            let suggestedSet = Set(suggested.map(\.id))
+            let remainder = actions.filter { !suggestedSet.contains($0.id) }
+            return Array((suggested + remainder).prefix(limit))
+        }
         let tokens = normalizedQuery.split(separator: " ").map(String.init)
 
         let ranked: [(Int, Int, HopAction)] = actions.enumerated().compactMap { index, action in
@@ -275,7 +292,10 @@ public enum HopActionCatalog {
 
     private static func normalize(_ value: String) -> String {
         value
-            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            .folding(
+                options: [.caseInsensitive, .diacriticInsensitive],
+                locale: Locale(identifier: "en_US_POSIX")
+            )
             .lowercased()
             .replacingOccurrences(of: "-", with: " ")
             .replacingOccurrences(of: "_", with: " ")
