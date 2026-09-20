@@ -49,8 +49,12 @@ enum SettingsKey {
     /// default; OFF renders every badge monochrome, telling same-corner pairs
     /// apart by shape (filled vs outline).
     static let coloredIndicators = "coloredIndicators"
-    /// JSON-encoded PanelTabsModel: the user's spaces (icon tabs) and their module keys.
+    /// JSON-encoded PanelTabsModel: the user's legacy module arrangement.
+    /// The Work / Mac / Tools shell deliberately does not overwrite this value;
+    /// it remains the compatibility/source-order store for module placement.
     static let panelTabs = "panelTabs"
+    /// Last semantic shell space selected in the compact panel.
+    static let hopSpace = "hopSpace"
     /// Which onboarding step to reopen on. SPEC: docs/spec.md — "Onboarding".
     static let onboardingStep = "onboardingStep"
     static let onboardingWantsApps = "onboardingWantsApps"
