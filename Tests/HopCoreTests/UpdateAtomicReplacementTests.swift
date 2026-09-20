@@ -20,6 +20,7 @@ final class UpdateAtomicReplacementTests: XCTestCase {
         )
         XCTAssertTrue(plan.guardReadyPath.hasSuffix("/guard-ready"))
         XCTAssertTrue(plan.stableAcknowledgementPath.hasSuffix("/launch-stable"))
+        XCTAssertTrue(plan.cleanExitPath.hasSuffix("/clean-exit"))
     }
 
     func testGuardArgumentsRoundTripWithoutShellParsing() {
@@ -184,6 +185,14 @@ final class UpdateAtomicReplacementTests: XCTestCase {
             cache + "/hop-update-transaction-../launch-stable",
             cacheDirectory: cache
         ))
+    }
+
+    func testCleanExitMarkerIsSiblingOfStableAcknowledgement() {
+        let stable = "/tmp/hop-update-transaction-ABC/launch-stable"
+        XCTAssertEqual(
+            UpdateRollbackProtocol.cleanExitPath(forAcknowledgementPath: stable),
+            "/tmp/hop-update-transaction-ABC/clean-exit"
+        )
     }
 
 }
