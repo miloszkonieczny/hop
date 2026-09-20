@@ -84,7 +84,7 @@ public enum ClipboardSecretDetector {
     /// unique prefix. They require both a sensitive NAME and a credential-like
     /// VALUE; placeholders and low-entropy examples remain persistable.
     private static let labelledCredential = Pattern(
-        #"(?:^|[\s{,])["']?(?:api[_-]?key|access[_-]?token|auth[_-]?token|refresh[_-]?token|client[_-]?secret|secret(?:[_-]?key)?|password|passwd|private[_-]?key|aws[_-]?secret[_-]?access[_-]?key|aws[_-]?session[_-]?token)["']?\s*[:=]\s*["']?([^\s"',;}]{12,})"#,
+        #"(?:^|[\s{,])["']?(?:api[_-]?(?:key|token)|access[_-]?token|auth[_-]?token|refresh[_-]?token|client[_-]?secret|secret(?:[_-]?key)?|password|passwd|private[_-]?key|database[_-]?password|db[_-]?password|service[_-]?role[_-]?key|(?:cloudflare|cf)[_-]?api[_-]?token|aws[_-]?secret[_-]?access[_-]?key|aws[_-]?session[_-]?token)["']?\s*[:=]\s*["']?([^\s"',;}]{12,})"#,
         options: [.caseInsensitive, .anchorsMatchLines],
         capturedCredentialGroup: 1
     )
