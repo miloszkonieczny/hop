@@ -74,10 +74,17 @@ final class HopActionTests: XCTestCase {
         XCTAssertEqual(HopActionCatalog.search("tool", in: actions).map(\.id), ["a", "b"])
     }
 
-    func testEmptyQueryReturnsCatalogOrderUpToLimit() {
+    func testEmptyQueryReturnsPersonalQuickActionsFirst() {
         XCTAssertEqual(
-            HopActionCatalog.search("", limit: 3).map(\.id),
-            Array(HopActionCatalog.all.prefix(3)).map(\.id)
+            HopActionCatalog.search("", limit: 6).map(\.id),
+            [
+                "capture.screenshotToolbar",
+                "capture.area",
+                "capture.ocr",
+                "network.protonVPN",
+                "window.minimize",
+                "focus.timer25",
+            ]
         )
     }
 }
