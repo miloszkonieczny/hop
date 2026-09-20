@@ -576,16 +576,42 @@ MUST NOT rewrite `panelTabs`. The last semantic selection is stored separately
 under `SettingsKey.hopSpace`; an unknown stored value falls back to Work.
 
 The old icon tab switcher is no longer drawn in the menu-bar panel. The fixed
-shell header contains a compact module search plus the three named spaces.
-Stage-one search is intentionally navigation-only: it matches existing visible
-module titles/IDs and jumps to the matching semantic space. It does not pretend
-to execute commands. Executable actions and ranking belong to the subsequent
-command-palette layer.
+shell header contains **Search actions…** plus the three named spaces.
+
+The search field is an executable command palette backed by
+`HopActionCatalog` in HopCore. Ranking is deterministic and local: every query
+token must match a title, id, keyword or subtitle; exact matches beat prefixes,
+word-prefixes beat substring matches, and catalog order breaks ties. Disabled
+modules are excluded before ranking, preserving the invariant that a module
+switched off is off everywhere. Empty focused search shows the first useful
+commands rather than a blank panel. Up/down changes the selected result, Return
+executes it, Escape clears a query first and leaves search on the second press.
+
+The existing configurable **show-panel hotkey** is also the command-palette
+shortcut. Opening a CLOSED panel with that key focuses Search actions
+immediately; clicking the menu-bar item still opens the ordinary last semantic
+space. Pressing the hotkey while the panel is already open retains its historical
+toggle-close behavior and leaves no stale search request behind.
+
+Initial commands intentionally reuse existing engines rather than duplicate
+features: Apple's own Screenshot app for the native screenshot/recording toolbar;
+Hop's area capture, OCR and markup controllers; the existing timer engine;
+WindowSnap for minimize/maximize/left/right; the converter, archiver and
+uninstaller windows; and semantic navigation to system/clipboard/to-dos.
+Commands that need the screen or another application's window close the popover
+first, then act after a short main-runloop delay so Hop itself is not captured or
+mistaken for the target window.
+
+**Open Proton VPN is open-only.** It first uses a Proton-owned VPN configuration
+when macOS exposes one, otherwise it looks for an installed Proton VPN app in the
+normal Applications folders and activates it. It does not click Connect, choose
+a server, store Proton credentials or automate Proton's UI. If Proton cannot be
+found, Hop reopens on its generic VPN module instead.
 
 A targeted reopen (`.spaceContaining(module)`) lands in that module's semantic
 space regardless of the previously selected space. Hidden modules remain hidden
-and are never surfaced by the shell search. Unknown/user-created modules default
-to Tools so the semantic projection cannot make data unreachable.
+and are never surfaced by the action palette. Unknown/user-created modules
+default to Tools so the semantic projection cannot make data unreachable.
 
 ### Switching a module off
 
