@@ -556,6 +556,37 @@ will stop (see "Switching a module off" below). The setting that used to hand
 combinations back to other applications stays gone; the module's own switch is
 what decides now.
 
+### Compact semantic shell (personal fork)
+
+The menu-bar panel presents exactly three named top-level spaces:
+**Work**, **Mac**, and **Tools** (`HopSpace`). This is a PRESENTATION LAYER,
+not a destructive migration of the user's stored module board.
+
+- Work: timer, tracker, to-dos and clipboard.
+- Mac: system monitor, speed test, VPN, torrents, keep-awake and keyboard lock.
+- Tools: capture/markup/OCR, windows, converter/archive/uninstaller, colour
+  picker, app shelves and any future/unknown module until it is explicitly
+  classified.
+
+`PanelTabsModel` remains the durable compatibility store. The shell flattens
+that model in its existing tab/module order and carries each module's original
+tab UUID into its view, so existing module actions, visibility, settings and
+stored layout data keep their identity. Entering or switching Work/Mac/Tools
+MUST NOT rewrite `panelTabs`. The last semantic selection is stored separately
+under `SettingsKey.hopSpace`; an unknown stored value falls back to Work.
+
+The old icon tab switcher is no longer drawn in the menu-bar panel. The fixed
+shell header contains a compact module search plus the three named spaces.
+Stage-one search is intentionally navigation-only: it matches existing visible
+module titles/IDs and jumps to the matching semantic space. It does not pretend
+to execute commands. Executable actions and ranking belong to the subsequent
+command-palette layer.
+
+A targeted reopen (`.spaceContaining(module)`) lands in that module's semantic
+space regardless of the previously selected space. Hidden modules remain hidden
+and are never surfaced by the shell search. Unknown/user-created modules default
+to Tools so the semantic projection cannot make data unreachable.
+
 ### Switching a module off
 
 The switch is in three places and they are one answer: the power button on the
