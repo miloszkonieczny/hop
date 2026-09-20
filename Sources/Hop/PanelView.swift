@@ -93,6 +93,7 @@ struct PanelView: View {
     /// that module to the top of its semantic space for this opening.
     @State private var preferredModuleID: String?
     @State private var shellQuery = ""
+    @State private var shellSelectionIndex = 0
     @FocusState private var shellSearchFocused: Bool
     // nil → the overlay back button falls through to the restored space
     @State private var scrubBaseDuration: TimeInterval?
@@ -343,7 +344,10 @@ struct PanelView: View {
         }
         .frame(width: 368)
         .background(Theme.panelBackground)
-        .onAppear { dropOrphanedShelfKeys() }
+        .onAppear {
+            dropOrphanedShelfKeys()
+            consumeCommandPaletteRequest()
+        }
         .simultaneousGesture(TapGesture().onEnded {
             // a click outside the display clears the digit-group selection (yellow highlight = focus)
             let tappedAt = Date()
@@ -366,7 +370,11 @@ struct PanelView: View {
         .onChange(of: trackerEditing) { _, _ in syncKeyboardCapture() }
         .onChange(of: todosEditing) { _, _ in syncKeyboardCapture() }
         .onChange(of: clipboardSearching) { _, _ in syncKeyboardCapture() }
-        .onChange(of: shellSearchFocused) { _, _ in syncKeyboardCapture() }
+        .onChange(of: shellSearchFocused) { _, _ in
+            syncKeyboardCapture()
+            if shellSearchFocused { shellSelectionIndex = 0 }
+        }
+        .onChange(of: shellQuery) { _, _ in shellSelectionIndex = 0 }
         .onDisappear {
             shellSearchFocused = false
             model.panelKeyboardCaptured = false
@@ -1189,10 +1197,11 @@ struct PanelView: View {
     /// storage identity while Work / Mac / Tools controls presentation.
     private var panelContent: some View {
         VStack(spacing: 16) {
-            if shellQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                shellSpaceContent
+            if shellSearchFocused
+                || !shellQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                shellActionResults
             } else {
-                shellSearchResults
+                shellSpaceContent
             }
         }
         .padding(.horizontal, 14)
@@ -1225,55 +1234,62 @@ struct PanelView: View {
         }
     }
 
-    /// Stage-one search is intentionally navigation-only: it finds existing
-    /// modules and moves to their semantic space. PR #6 will replace this with
-    /// executable `HopAction` results. Shipping a dead search field would be
-    /// worse than shipping this small but real behavior.
-    private var shellSearchResults: some View {
-        let query = shellQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let matches = allVisiblePlacements.filter { placement in
-            let title = moduleTitle(placement.moduleID).lowercased()
-            return title.contains(query) || placement.moduleID.lowercased().contains(query)
-        }
+    /// Executable command palette. Empty focused search shows the first useful
+    /// commands; typing deterministically re-ranks the same catalog.
+    private var shellActionResults: some View {
+        let matches = currentActionMatches
         return VStack(spacing: 6) {
             if matches.isEmpty {
-                Text("No matching tools")
+                Text("No matching actions")
                     .font(Theme.mono(11))
                     .foregroundStyle(Theme.textTertiary)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 24)
             } else {
-                ForEach(matches.prefix(8)) { placement in
-                    let destination = HopSpace.containing(module: placement.moduleID)
+                ForEach(Array(matches.enumerated()), id: \.element.id) { index, action in
                     Button {
-                        selectHopSpace(
-                            destination,
-                            persist: true,
-                            preferredModule: placement.moduleID
-                        )
-                        shellQuery = ""
-                        shellSearchFocused = false
+                        executeHopAction(action)
                     } label: {
-                        HStack(spacing: 8) {
-                            Image(systemName: destination.systemImage)
-                                .font(.system(size: 11))
-                                .foregroundStyle(Theme.textTertiary)
-                                .frame(width: 18)
-                            Text(moduleTitle(placement.moduleID))
-                                .font(Theme.mono(11))
-                                .foregroundStyle(Theme.textPrimary)
-                                .lineLimit(1)
+                        HStack(spacing: 9) {
+                            Image(systemName: action.systemImage)
+                                .font(.system(size: 12))
+                                .foregroundStyle(
+                                    index == shellSelectionIndex
+                                        ? Theme.textPrimary : Theme.textSecondary
+                                )
+                                .frame(width: 20)
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(action.title)
+                                    .font(Theme.mono(11, weight: .semibold))
+                                    .foregroundStyle(Theme.textPrimary)
+                                    .lineLimit(1)
+                                Text(action.subtitle)
+                                    .font(Theme.mono(8))
+                                    .foregroundStyle(Theme.textTertiary)
+                                    .lineLimit(1)
+                            }
+
                             Spacer(minLength: 8)
-                            Text(destination.title)
-                                .font(Theme.mono(9))
-                                .foregroundStyle(Theme.textTertiary)
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 8, weight: .semibold))
+
+                            Text(action.space.title)
+                                .font(Theme.mono(8, weight: .semibold))
                                 .foregroundStyle(Theme.textTertiary)
                         }
                         .padding(.horizontal, 10)
                         .padding(.vertical, 8)
-                        .background(Theme.rowBg, in: RoundedRectangle(cornerRadius: 7))
+                        .background(
+                            index == shellSelectionIndex ? Theme.chipBg : Theme.rowBg,
+                            in: RoundedRectangle(cornerRadius: 7)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 7)
+                                .stroke(
+                                    index == shellSelectionIndex
+                                        ? Theme.textTertiary.opacity(0.35) : .clear,
+                                    lineWidth: 1
+                                )
+                        )
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -1286,10 +1302,11 @@ struct PanelView: View {
     /// A fresh ScrollView identity per semantic space/query makes every switch
     /// start at the top while the fixed chrome stays pixel-stable.
     private var scrollResetKey: String {
-        if shellQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        if !shellSearchFocused
+            && shellQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return "hop-space:\(hopSpace.rawValue)"
         }
-        return "hop-search:\(shellQuery)"
+        return "hop-actions:\(shellQuery)"
     }
 
     private var chromeHeightReader: some View {
@@ -1571,12 +1588,12 @@ struct PanelView: View {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 11))
                         .foregroundStyle(Theme.textTertiary)
-                    TextField("Find tools…", text: $shellQuery)
+                    TextField("Search actions…", text: $shellQuery)
                         .textFieldStyle(.plain)
                         .font(Theme.mono(11))
                         .foregroundStyle(Theme.textPrimary)
                         .focused($shellSearchFocused)
-                        .onSubmit { openSingleShellSearchMatch() }
+                        .onSubmit { executeSelectedHopAction() }
                 }
                 .padding(.horizontal, 9)
                 .frame(height: 30)
