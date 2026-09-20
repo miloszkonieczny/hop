@@ -15,6 +15,13 @@ enum UpdateRollbackGuard {
     static func runIfRequested() {
         guard let request = UpdateRollbackProtocol.guardRequest(arguments: CommandLine.arguments)
         else { return }
+        guard UpdateRollbackProtocol.isValidGuardRequest(
+            request,
+            productionTargetPath: "/Applications/Hop.app",
+            cacheDirectory: transactionCacheDirectory
+        ) else {
+            exit(64)
+        }
 
         let result = run(request)
         exit(result)
@@ -26,6 +33,10 @@ enum UpdateRollbackGuard {
     static func acknowledgeStableLaunchIfRequested() {
         guard let path = UpdateRollbackProtocol.acknowledgementPath(
             arguments: CommandLine.arguments
+        ),
+        UpdateRollbackProtocol.isValidAcknowledgementPath(
+            path,
+            cacheDirectory: transactionCacheDirectory
         ) else { return }
         touch(path)
     }
@@ -155,6 +166,16 @@ enum UpdateRollbackGuard {
         }
         return FileManager.default.fileExists(atPath: path)
     }
+
+    private static var transactionCacheDirectory: String {
+        let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        return base.appendingPathComponent(
+            UpdateCodeSignaturePolicy.expectedBundleIdentifier,
+            isDirectory: true
+        ).path
+    }
+
 
     private static func touch(_ path: String) {
         let url = URL(fileURLWithPath: path)
