@@ -89,6 +89,9 @@ struct PanelView: View {
     /// `screen` is retained as the compatibility/source-tab context for module
     /// actions while this selects what the user actually sees.
     @State private var hopSpace: HopSpace
+    /// A targeted reopen (for example the eyedropper returning a colour) pins
+    /// that module to the top of its semantic space for this opening.
+    @State private var preferredModuleID: String?
     @State private var shellQuery = ""
     @FocusState private var shellSearchFocused: Bool
     // nil → the overlay back button falls through to the restored space
@@ -246,6 +249,7 @@ struct PanelView: View {
         // legacy source-tab context and the new semantic shell independently.
         _screen = State(initialValue: Self.resolve(initial))
         _hopSpace = State(initialValue: Self.resolveHopSpace(initial))
+        _preferredModuleID = State(initialValue: Self.preferredModule(for: initial))
         self.standaloneSettings = standaloneSettings
         self.previewModules = previewModules
         self.layoutTableOnly = layoutTableOnly
@@ -380,7 +384,11 @@ struct PanelView: View {
             if case .space(let id) = resolved { activeSpaceRaw = id.uuidString }
             switch target {
             case .spaceContaining(let module):
-                selectHopSpace(HopSpace.containing(module: module), persist: true)
+                selectHopSpace(
+                    HopSpace.containing(module: module),
+                    persist: true,
+                    preferredModule: module
+                )
             case .firstSpace:
                 selectHopSpace(.work, persist: true)
             case .restore:
@@ -1193,7 +1201,7 @@ struct PanelView: View {
     }
 
     @ViewBuilder private var shellSpaceContent: some View {
-        let placements = collapsedPlacements(visiblePlacements(in: hopSpace))
+        let placements = collapsedPlacements(displayPlacements(in: hopSpace))
         if placements.isEmpty {
             Text(t(.tabEmptyHint))
                 .font(Theme.mono(11))
@@ -1238,7 +1246,11 @@ struct PanelView: View {
                 ForEach(matches.prefix(8)) { placement in
                     let destination = HopSpace.containing(module: placement.moduleID)
                     Button {
-                        selectHopSpace(destination, persist: true)
+                        selectHopSpace(
+                            destination,
+                            persist: true,
+                            preferredModule: placement.moduleID
+                        )
                         shellQuery = ""
                         shellSearchFocused = false
                     } label: {
@@ -3009,6 +3021,11 @@ struct PanelView: View {
         }
     }
 
+    private static func preferredModule(for initial: InitialScreen) -> String? {
+        if case .spaceContaining(let module) = initial { return module }
+        return nil
+    }
+
     private func mutateTabs(_ body: (inout PanelTabsModel) -> Void) {
         var model = tabsModel
         body(&model)
@@ -3034,6 +3051,19 @@ struct PanelView: View {
             .filter { moduleVisible($0.moduleID) }
     }
 
+    private func displayPlacements(in space: HopSpace) -> [HopSpaceModulePlacement] {
+        let placements = visiblePlacements(in: space)
+        guard let preferredModuleID,
+              let index = placements.firstIndex(where: { $0.moduleID == preferredModuleID }),
+              index > 0
+        else { return placements }
+
+        var reordered = placements
+        let preferred = reordered.remove(at: index)
+        reordered.insert(preferred, at: 0)
+        return reordered
+    }
+
     private func collapsedPlacements(
         _ placements: [HopSpaceModulePlacement]
     ) -> [HopSpaceModulePlacement] {
@@ -3053,8 +3083,13 @@ struct PanelView: View {
         }
     }
 
-    private func selectHopSpace(_ space: HopSpace, persist: Bool) {
+    private func selectHopSpace(
+        _ space: HopSpace,
+        persist: Bool,
+        preferredModule: String? = nil
+    ) {
         hopSpace = space
+        preferredModuleID = preferredModule
         shellQuery = ""
         if persist {
             UserDefaults.standard.set(space.rawValue, forKey: SettingsKey.hopSpace)
@@ -3063,9 +3098,12 @@ struct PanelView: View {
         // Keep the old source-tab context coherent for compatibility code that
         // still asks which legacy tab owns an action. No stored module layout is
         // changed here.
-        if let first = visiblePlacements(in: space).first {
-            screen = .space(first.sourceTabID)
-            activeSpaceRaw = first.sourceTabID.uuidString
+        let source = preferredModule.flatMap { module in
+            visiblePlacements(in: space).first { $0.moduleID == module }
+        } ?? visiblePlacements(in: space).first
+        if let source {
+            screen = .space(source.sourceTabID)
+            activeSpaceRaw = source.sourceTabID.uuidString
         }
     }
 
@@ -3077,7 +3115,11 @@ struct PanelView: View {
                 || placement.moduleID.lowercased().contains(query)
         }
         guard matches.count == 1, let match = matches.first else { return }
-        selectHopSpace(HopSpace.containing(module: match.moduleID), persist: true)
+        selectHopSpace(
+            HopSpace.containing(module: match.moduleID),
+            persist: true,
+            preferredModule: match.moduleID
+        )
         shellSearchFocused = false
     }
 
