@@ -270,7 +270,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let hotkeys = HotkeyManager.shared
         hotkeys.setHandler(ModuleCatalog.panelAction) { [weak self] in
-            self?.statusController?.togglePanel()
+            guard let self else { return }
+            // The existing panel hotkey doubles as the command-palette shortcut:
+            // a menu-bar click still opens the normal last space, while the key
+            // opens the same compact panel with search already focused.
+            self.model.commandPaletteRequest &+= 1
+            self.statusController?.togglePanel()
         }
         for (module, handler) in moduleHotkeyHandlers() {
             guard let action = ModuleCatalog.open(module) else { continue }
