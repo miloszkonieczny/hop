@@ -377,6 +377,8 @@ struct PanelView: View {
         .onChange(of: shellQuery) { _, _ in shellSelectionIndex = 0 }
         .onDisappear {
             shellSearchFocused = false
+            shellQuery = ""
+            shellSelectionIndex = 0
             model.panelKeyboardCaptured = false
             // A normal left-click / hotkey reopen does not fire the openTab
             // handler (openTab stays nil), and @State survives the popover
