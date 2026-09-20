@@ -5772,11 +5772,16 @@ its own database of known apps may do better on real software than it did here.
   both icon labels to dark text whatever the system appearance is, so the
   backdrop carries light pads under "Hop" and "Applications". make-dmg.sh
   asserts the whole layout after building.
-- After installing an update the app relaunches itself: a detached shell
-  helper waits for the old process to exit and opens the new bundle
-  (a plain `open` before terminate only activates the still-running old
-  instance — nothing would start the new one, and two live instances
-  racing NSWorkspace.setIcon corrupted the Finder icon into a folder).
+- After installing an update the app relaunches itself through a rollback
+  guard started from the OLD executable before any bundle paths are exchanged.
+  The guard must first write a readiness marker; a successful `Process.run()`
+  alone is not enough evidence that recovery is alive. It then waits for the old
+  process to exit and launches the replacement with `open -n -W`, so a launch
+  failure or early crash is observed immediately rather than after a blind
+  timeout. The old bundle is kept until the replacement reaches the SAME
+  30-second stability point used by `LaunchGuard`; a clean user quit before
+  that point counts as stable for both mechanisms. No shell parses updater
+  paths or arguments.
 - Auto-check cadence: 15 s after launch, every hour, and 30 s after
   wake from sleep (the quietest moment — the user is just coming back
   and doesn't rely on the app yet). Only the tiny latest.json is fetched
@@ -6143,11 +6148,33 @@ is written the way its newest one is.
 - The test build is "Hop Dev.app" (`--install --dev`), living in parallel;
   its icon carries a gold "D" badge in the bottom-right corner so the
   production and test builds can't be confused.
-- Install staging (`temporaryDirectory/hop-update-<UUID>`) cannot be
-  removed by the process that created it — it terminates right after
-  copying the new bundle. Each launch sweeps ALL leftover hop-update-*
-  folders instead (they were accumulating ~7 MB per update until macOS's
-  periodic temp purge).
+- The downloaded archive is still extracted under
+  `temporaryDirectory/hop-update-<UUID>`; each launch sweeps those temporary
+  leftovers. The VERIFIED app is then copied with `ditto` to a hidden sibling
+  of the production bundle,
+  `/Applications/.Hop-update-rollback-<transaction>.app`, and verified AGAIN
+  there. This second copy is mandatory because the object about to be installed,
+  not merely its source in /tmp, is what must satisfy the version, architecture,
+  bundle-ID and Developer-ID invariants.
+- Replacement is an atomic directory-entry exchange with macOS `RENAME_SWAP`.
+  Both bundles are on the same filesystem before the exchange. There is NO
+  remove-then-copy or remove-then-move fallback: at every instant
+  `/Applications/Hop.app` names one complete bundle. After the exchange the
+  hidden sibling is the known-good OLD app.
+- The replacement is verified once more at the canonical path. Its Info.plist is
+  read directly from disk rather than through `Bundle(url:)`, because the
+  running old process still owns `Bundle.main` and Foundation may cache bundle
+  metadata across a path swap. The code signature is re-checked at that final
+  path as well.
+- The rollback guard owns the old bundle until the new app proves a stable
+  launch. If the replacement exits before acknowledgement or cannot be launched,
+  the guard uses the same atomic `RENAME_SWAP` to put the old app back and then
+  relaunches it. If even the rollback exchange fails, BOTH bundles are preserved;
+  the guard never deletes the last known-good copy.
+- The hidden guard/acknowledgement launch modes are path-constrained to
+  `/Applications/Hop.app`, the matching hidden rollback sibling, and Hop's own
+  cache transaction directory. They are not general-purpose rename/write
+  primitives.
 
 
 ## Converter: window height and audio
@@ -6285,8 +6312,10 @@ opened" dialog and the Privacy & Security override.
   verification alone is not enough. An ad-hoc build, an Apple Development build,
   another team's build, or a damaged signature fails closed and the update is not
   installed.
-- The updater installs with `ditto`, not `copyItem`: it carries a bundle across
-  whole, and a bundle that arrives intact keeps both the signature the permission
-  hangs on and the stapled ticket.
+- `ditto` is used to carry the verified candidate bundle to its same-volume
+  staging sibling with extended attributes, ACLs and symlinks intact. Installation
+  itself is the atomic directory swap described in the update-channel section;
+  the updater never deletes the live production bundle before its replacement is
+  complete and independently verified.
 
 ### Release
