@@ -358,9 +358,9 @@ final class VPNController: ObservableObject {
                 configuration.appName ?? "",
                 configuration.bundleIdentifier ?? "",
             ].contains { $0.localizedCaseInsensitiveContains("proton") }
-        }), configuration.bundleIdentifier != nil {
-            openApp(for: configuration)
-            return true
+        }), let bundle = configuration.bundleIdentifier,
+           let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundle) {
+            return activateApplication(at: url)
         }
 
         let fm = FileManager.default
@@ -381,16 +381,24 @@ final class VPNController: ObservableObject {
                     && name.contains("proton")
                     && name.contains("vpn")
             }) {
-                let options = NSWorkspace.OpenConfiguration()
-                options.activates = true
-                NSWorkspace.shared.openApplication(
-                    at: proton,
-                    configuration: options
-                ) { _, _ in }
-                return true
+                return activateApplication(at: proton)
             }
         }
         return false
+    }
+
+    /// Pure activation: unlike `openApp(for:)`, this does not touch the
+    /// network service or tunnel state. The command palette's Proton action
+    /// promises "open", not "change VPN configuration".
+    @discardableResult
+    private func activateApplication(at url: URL) -> Bool {
+        let options = NSWorkspace.OpenConfiguration()
+        options.activates = true
+        NSWorkspace.shared.openApplication(
+            at: url,
+            configuration: options
+        ) { _, _ in }
+        return true
     }
 
     /// Brings up the app that owns this configuration. Nothing else in Hop needs
