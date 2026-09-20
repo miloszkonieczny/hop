@@ -6,7 +6,9 @@ import UniformTypeIdentifiers
 /// Clipboard history: once a second we compare the NSPasteboard changeCount
 /// (macOS has no clipboard events — every clipboard manager does it this way).
 /// Concealed content (password managers mark it with ConcealedType) is not saved.
-/// The history RULES (dedup, caps) live in HopCore.ClipboardRules with tests;
+/// Text that matches HopCore's high-confidence credential rules is also never
+/// persisted, even when the source app forgot to mark it concealed.
+/// The history RULES (dedup, caps, secret exclusion) live in HopCore with tests;
 /// this controller owns the pasteboard, image files and persistence.
 @MainActor
 final class ClipboardController: ObservableObject {
