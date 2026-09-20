@@ -226,6 +226,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let crashLoop = LaunchGuard.registerLaunch()
         DispatchQueue.main.asyncAfter(deadline: .now() + LaunchGuard.stableAfter) {
             LaunchGuard.markStable()
+            // The updater keeps the previous app bundle until this exact
+            // stability point. Reaching it is the commit signal that lets the
+            // rollback guard discard the old version.
+            UpdateRollbackGuard.acknowledgeStableLaunchIfRequested()
         }
         if crashLoop {
             enterSafeMode()
@@ -1146,6 +1150,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         LaunchGuard.markStable()
+        // A deliberate clean quit before the 30-second timer is also considered
+        // stable by LaunchGuard, so it must commit an update transaction too.
+        UpdateRollbackGuard.acknowledgeStableLaunchIfRequested()
         // Kill the torrent engine on a clean quit: rqbit is a child process that
         // would otherwise be reparented to launchd and keep holding its fixed
         // DHT/peer ports, so the NEXT launch could not start its own engine.
@@ -1520,6 +1527,11 @@ struct HopApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     init() {
+        // Production-only hidden path used by the updater's rollback guard.
+        // A guard invocation exits from here before SwiftUI or AppDelegate
+        // startup, so it cannot touch user state or create a second UI instance.
+        UpdateRollbackGuard.runIfRequested()
+
         // Dev-only entry points, gated out of release:
         //  • --torrent-selftest runs an ARBITRARY binary path (skipping the engine
         //    signature check) — a launch-arbitrary-binary gadget if shipped.
