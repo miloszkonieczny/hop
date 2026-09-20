@@ -172,7 +172,7 @@ public enum ClipboardSecretDetector {
             "example", "dummy", "redacted", "<token>", "<secret>",
             "${", "{{",
         ]
-        if markers.contains(where: lower.contains) { return true }
+        if markers.contains(where: { lower.contains($0) }) { return true }
 
         // Repeated mask/example characters are documentation, not credentials.
         let compact = lower.filter { !$0.isWhitespace }
