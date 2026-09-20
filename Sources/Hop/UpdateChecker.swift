@@ -399,7 +399,7 @@ final class UpdateChecker: ObservableObject {
                 // against copy/swap/path mistakes. If this fails, exchange the
                 // directories back before returning control to the user.
                 do {
-                    try validateUpdateBundle(target, info: info)
+                    try validateFinalInstalledBundle(target, info: info)
                 } catch {
                     do {
                         try UpdateAtomicReplacement.swap(
@@ -453,6 +453,37 @@ final class UpdateChecker: ObservableObject {
         // Archive authenticity is necessary but not sufficient: the bundle at
         // EACH stage must also be intact Developer ID code from Hop's expected
         // Apple team.
+        guard try run(
+            "/usr/bin/codesign",
+            UpdateCodeSignaturePolicy.verificationArguments(appPath: app.path)
+        ) == 0 else {
+            throw URLError(.cannotParseResponse)
+        }
+    }
+
+    private func validateFinalInstalledBundle(
+        _ app: URL,
+        info: ReleaseInfo
+    ) throws {
+        // Do not use Bundle(url:) for the canonical path here. Bundle.main still
+        // represents the already-running OLD process and Foundation may cache
+        // bundle metadata by URL across the atomic directory swap. Read the
+        // candidate's Info.plist directly from disk instead.
+        let plistURL = app.appendingPathComponent("Contents/Info.plist")
+        let data = try Data(contentsOf: plistURL)
+        guard let plist = try PropertyListSerialization.propertyList(
+                from: data,
+                options: [],
+                format: nil
+              ) as? [String: Any],
+              plist["CFBundleShortVersionString"] as? String == info.version,
+              plist["CFBundleIdentifier"] as? String
+                == UpdateCodeSignaturePolicy.expectedBundleIdentifier
+        else { throw URLError(.cannotParseResponse) }
+
+        // The same directory entry was architecture-checked immediately before
+        // RENAME_SWAP, which changes names rather than bytes. Re-check the code
+        // signature at the final canonical path to catch any path/copy mistake.
         guard try run(
             "/usr/bin/codesign",
             UpdateCodeSignaturePolicy.verificationArguments(appPath: app.path)
