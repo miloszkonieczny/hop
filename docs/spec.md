@@ -935,10 +935,24 @@ modules sits exactly in the middle: top inset = bottom inset = 16pt.
   clipboard (its position doesn't change); a FILE entry goes back as the file
   URL(s) plus the path text — Finder pastes the file itself, text fields get the
   path (vanished files are skipped). File entries never take part in text dedup.
-  Buttons: copy / paste into the last app. Confidential content (password
-  managers) is not stored, and everything lives only on this Mac. Pruning a file
-  entry off the history never deletes the file on disk. The entry limit is in
-  settings.
+  Buttons: copy / paste into the last app. Confidential content is not stored:
+  Hop first honors macOS `org.nspasteboard.ConcealedType` (used by password
+  managers), then applies `ClipboardSecretDetector` to TEXT before persistence
+  so a source app that forgets the concealed marker cannot quietly put a
+  recognizable credential into history. The detector is deliberately
+  high-confidence rather than generic "random string" guessing: private-key
+  blocks, JWTs, explicit Authorization credentials, embedded URL passwords,
+  provider-defined token prefixes, and high-entropy values under explicit
+  secret/password/token/key labels. Public SSH keys, hashes, UUIDs, ordinary
+  URLs, Stripe publishable keys, documentation placeholders and unlabeled opaque
+  strings remain normal clipboard entries. Detection is local, returns only a
+  boolean and never logs the matched value. A detected secret remains on the
+  SYSTEM clipboard — the user's copy still works — but never enters Hop's
+  durable history. On upgrade, already-stored high-confidence secret text rows
+  are removed from UserDefaults immediately on load. File/image/color entries
+  are not content-scanned. Everything Hop does keep lives only on this Mac.
+  Pruning a file entry off the history never deletes the file on disk. The entry
+  limit is in settings.
 - Images: raw clipboard image data (a screenshot copied straight to the
   clipboard via ⌃⇧⌘4, "copy image" in a browser) is stored as a PNG in
   Application Support (per bundle id); the row shows a small thumbnail and
