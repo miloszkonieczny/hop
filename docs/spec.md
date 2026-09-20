@@ -5779,9 +5779,10 @@ its own database of known apps may do better on real software than it did here.
   process to exit and launches the replacement with `open -n -W`, so a launch
   failure or early crash is observed immediately rather than after a blind
   timeout. The old bundle is kept until the replacement reaches the SAME
-  30-second stability point used by `LaunchGuard`; a clean user quit before
-  that point counts as stable for both mechanisms. No shell parses updater
-  paths or arguments.
+  30-second stability point used by `LaunchGuard`. A clean user quit before
+  that point is NOT a commit signal: the guard atomically restores the old
+  version but leaves it quit. An abnormal early exit restores and relaunches the
+  old version. No shell parses updater paths or arguments.
 - Auto-check cadence: 15 s after launch, every hour, and 30 s after
   wake from sleep (the quietest moment — the user is just coming back
   and doesn't rely on the app yet). Only the tiny latest.json is fetched
