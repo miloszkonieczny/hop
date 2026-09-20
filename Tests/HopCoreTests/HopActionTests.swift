@@ -54,6 +54,17 @@ final class HopActionTests: XCTestCase {
         }
     }
 
+    func testEveryExecutionKindHasExactlyOneCatalogAction() {
+        XCTAssertEqual(
+            Set(HopActionCatalog.all.map(\.execution)),
+            Set(HopAction.Execution.allCases)
+        )
+        XCTAssertEqual(
+            Set(HopActionCatalog.all.map(\.execution)).count,
+            HopActionCatalog.all.count
+        )
+    }
+
     func testSearchRequiresEveryToken() {
         XCTAssertTrue(HopActionCatalog.search("vpn screenshot").isEmpty)
     }
@@ -63,12 +74,14 @@ final class HopActionTests: XCTestCase {
             HopAction(
                 id: "a", title: "Alpha Tool", subtitle: "",
                 keywords: ["tool"], category: .navigate, space: .tools,
-                systemImage: "a"
+                systemImage: "a",
+                execution: .showClipboard
             ),
             HopAction(
                 id: "b", title: "Beta Tool", subtitle: "",
                 keywords: ["tool"], category: .navigate, space: .tools,
-                systemImage: "b"
+                systemImage: "b",
+                execution: .showClipboard
             ),
         ]
         XCTAssertEqual(HopActionCatalog.search("tool", in: actions).map(\.id), ["a", "b"])
