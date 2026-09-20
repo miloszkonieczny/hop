@@ -108,4 +108,71 @@ public enum UpdateRollbackProtocol {
         else { return nil }
         return arguments[index + 1]
     }
+
+    /// Production guard invocations are deliberately path-constrained. This
+    /// hidden launch mode must never become a general-purpose rename/delete
+    /// primitive merely because another local process can execute Hop.
+    public static func isValidGuardRequest(
+        _ request: GuardRequest,
+        productionTargetPath: String,
+        cacheDirectory: String
+    ) -> Bool {
+        let target = standardized(request.targetPath)
+        let expectedTarget = standardized(productionTargetPath)
+        guard target == expectedTarget else { return false }
+
+        let targetURL = URL(fileURLWithPath: target)
+        let rollbackURL = URL(fileURLWithPath: standardized(request.rollbackPath))
+        guard rollbackURL.deletingLastPathComponent().path
+                == targetURL.deletingLastPathComponent().path
+        else { return false }
+
+        let rollbackName = rollbackURL.lastPathComponent
+        let rollbackPrefix = ".Hop-update-rollback-"
+        guard rollbackName.hasPrefix(rollbackPrefix),
+              rollbackName.hasSuffix(".app")
+        else { return false }
+        let transactionID = String(
+            rollbackName.dropFirst(rollbackPrefix.count).dropLast(".app".count)
+        )
+        guard !transactionID.isEmpty,
+              !transactionID.contains("/"),
+              !transactionID.contains("..")
+        else { return false }
+
+        let expectedState = URL(
+            fileURLWithPath: standardized(cacheDirectory),
+            isDirectory: true
+        ).appendingPathComponent(
+            "hop-update-transaction-\(transactionID)",
+            isDirectory: true
+        ).standardizedFileURL.path
+
+        let ready = URL(fileURLWithPath: standardized(request.guardReadyPath))
+        let acknowledgement = URL(
+            fileURLWithPath: standardized(request.stableAcknowledgementPath)
+        )
+        return ready.lastPathComponent == "guard-ready"
+            && acknowledgement.lastPathComponent == "launch-stable"
+            && ready.deletingLastPathComponent().path == expectedState
+            && acknowledgement.deletingLastPathComponent().path == expectedState
+    }
+
+    public static func isValidAcknowledgementPath(
+        _ path: String,
+        cacheDirectory: String
+    ) -> Bool {
+        let acknowledgement = URL(fileURLWithPath: standardized(path))
+        guard acknowledgement.lastPathComponent == "launch-stable" else { return false }
+
+        let state = acknowledgement.deletingLastPathComponent()
+        guard state.lastPathComponent.hasPrefix("hop-update-transaction-") else {
+            return false
+        }
+        return state.deletingLastPathComponent().path == standardized(cacheDirectory)
+    }
+
+    private static func standardized(_ path: String) -> String {
+        (path as NSString).standardizingPath
+    }
 }
