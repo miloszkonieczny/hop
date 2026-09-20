@@ -317,7 +317,7 @@ final class UpdateChecker: ObservableObject {
                     expectedBundleIdentifier: expectedBundleIdentifier,
                     embeddedBundleIdentifier: candidate.bundleIdentifier,
                     expectedCPUType: Self.runningCPUType,
-                    executableCPUTypes: candidate.executableArchitectures ?? []
+                    executableCPUTypes: candidate.executableArchitectures?.map(\.intValue) ?? []
                   )
             else { throw URLError(.cannotParseResponse) }
 
