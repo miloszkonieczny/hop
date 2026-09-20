@@ -272,9 +272,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hotkeys.setHandler(ModuleCatalog.panelAction) { [weak self] in
             guard let self else { return }
             // The existing panel hotkey doubles as the command-palette shortcut:
-            // a menu-bar click still opens the normal last space, while the key
-            // opens the same compact panel with search already focused.
-            self.model.commandPaletteRequest &+= 1
+            // a menu-bar click still opens the normal last space, while opening
+            // a CLOSED panel by key puts focus directly in command search. When
+            // already open, the same key keeps its historical toggle-close
+            // behavior and leaves no stale focus request behind.
+            if self.model.isPanelOpen?() != true {
+                self.model.commandPaletteRequested = true
+            }
             self.statusController?.togglePanel()
         }
         for (module, handler) in moduleHotkeyHandlers() {
