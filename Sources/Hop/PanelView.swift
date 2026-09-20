@@ -3028,6 +3028,22 @@ struct PanelView: View {
         }
     }
 
+    /// Resolve the semantic shell independently from the legacy source tab.
+    /// Targeted opens (OCR, colour, system, etc.) always land in the semantic
+    /// home of that module; an ordinary reopen restores the last shell space.
+    private static func resolveHopSpace(_ initial: InitialScreen) -> HopSpace {
+        switch initial {
+        case .firstSpace:
+            return .work
+        case .spaceContaining(let module):
+            return HopSpace.containing(module: module)
+        case .restore:
+            return HopSpaceLayout.restoredSpace(
+                from: UserDefaults.standard.string(forKey: SettingsKey.hopSpace)
+            )
+        }
+    }
+
     private func mutateTabs(_ body: (inout PanelTabsModel) -> Void) {
         var model = tabsModel
         body(&model)
@@ -3035,6 +3051,69 @@ struct PanelView: View {
         // Module-gated combos follow visibility: showing a module claims its
         // hotkey, hiding it hands the combo back to the rest of the system.
         HotkeyManager.shared.refreshModuleHotkeys()
+    }
+
+    private var allVisiblePlacements: [HopSpaceModulePlacement] {
+        HopSpace.allCases.flatMap { visiblePlacements(in: $0) }
+    }
+
+    private var currentShellModuleKeys: Set<String> {
+        Set(visiblePlacements(in: hopSpace).map(\.moduleID))
+    }
+
+    /// The shell is a semantic projection over the existing stored board. The
+    /// source tab id travels with every module, so no migration or destructive
+    /// rewrite of `panelTabs` is needed.
+    private func visiblePlacements(in space: HopSpace) -> [HopSpaceModulePlacement] {
+        HopSpaceLayout.placements(in: tabsModel, space: space)
+            .filter { moduleVisible($0.moduleID) }
+    }
+
+    private func collapsedPlacements(
+        _ placements: [HopSpaceModulePlacement]
+    ) -> [HopSpaceModulePlacement] {
+        guard toolsOneRow else { return placements }
+        let present = placements.filter { Self.toolModules.contains($0.moduleID) }
+        guard present.count > 1, let first = present.first else { return placements }
+
+        var inserted = false
+        return placements.compactMap { placement in
+            guard Self.toolModules.contains(placement.moduleID) else { return placement }
+            guard !inserted else { return nil }
+            inserted = true
+            return HopSpaceModulePlacement(
+                moduleID: Self.toolsRowKey,
+                sourceTabID: first.sourceTabID
+            )
+        }
+    }
+
+    private func selectHopSpace(_ space: HopSpace, persist: Bool) {
+        hopSpace = space
+        shellQuery = ""
+        if persist {
+            UserDefaults.standard.set(space.rawValue, forKey: SettingsKey.hopSpace)
+        }
+
+        // Keep the old source-tab context coherent for compatibility code that
+        // still asks which legacy tab owns an action. No stored module layout is
+        // changed here.
+        if let first = visiblePlacements(in: space).first {
+            screen = .space(first.sourceTabID)
+            activeSpaceRaw = first.sourceTabID.uuidString
+        }
+    }
+
+    private func openSingleShellSearchMatch() {
+        let query = shellQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !query.isEmpty else { return }
+        let matches = allVisiblePlacements.filter { placement in
+            moduleTitle(placement.moduleID).lowercased().contains(query)
+                || placement.moduleID.lowercased().contains(query)
+        }
+        guard matches.count == 1, let match = matches.first else { return }
+        selectHopSpace(HopSpace.containing(module: match.moduleID), persist: true)
+        shellSearchFocused = false
     }
 
     /// The three window modules, in the order the row shows them. The
@@ -3062,9 +3141,12 @@ struct PanelView: View {
         }
     }
 
-    /// Which tools the collapsed row offers, in the panel's own order.
+    /// Which tools the collapsed row offers, in the semantic shell's order.
+    /// The source tab no longer limits this row: convert/archive may have lived
+    /// on different legacy tabs, but Tools presents them as one semantic group.
     private func toolsInRow(_ id: UUID) -> [ToolsRowView.Tool] {
-        visibleModules(in: id)
+        visiblePlacements(in: hopSpace)
+            .map(\.moduleID)
             .filter { Self.toolModules.contains($0) }
             .compactMap { ToolsRowView.Tool(rawValue: $0) }
     }
