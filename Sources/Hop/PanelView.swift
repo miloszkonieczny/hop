@@ -1315,8 +1315,7 @@ struct PanelView: View {
                 && press.key.character.lowercased() == "v"
         }
         if isPasteChord {
-            guard let id = currentSpaceID,
-                  visibleModules(in: id).contains("convert"),
+            guard currentShellModuleKeys.contains("convert"),
                   editUnit == nil
             else { return .ignored }
             if model.converter.addFromPasteboard() {
@@ -1325,8 +1324,7 @@ struct PanelView: View {
             return .handled
         }
 
-        guard let id = currentSpaceID,
-              visibleModules(in: id).contains("timer"),
+        guard currentShellModuleKeys.contains("timer"),
               !model.engine.isStopwatch,
               model.engine.state == .idle || model.engine.state == .finished
         else { return .ignored }
