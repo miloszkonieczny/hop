@@ -399,9 +399,16 @@ final class ClipboardController: ObservableObject {
         guard let data = UserDefaults.standard.data(forKey: storageKey),
               let stored = try? JSONDecoder().decode([Item].self, from: data)
         else { return }
+
+        // Upgrade hardening: an older build may already have persisted a token.
+        // Strip only high-confidence secret TEXT rows before they can be shown
+        // again. No secret value is logged, transformed or reported.
+        let sanitized = ClipboardRules.removingSecrets(from: stored)
+        let removedSecrets = sanitized.count != stored.count
+
         // entries whose file vanished are dropped; orphan files (a crash
         // between write and save) are swept
-        items = stored.filter { item in
+        items = sanitized.filter { item in
             guard let file = item.imageFile else { return true }
             return FileManager.default.fileExists(
                 atPath: Self.imagesDir.appendingPathComponent(file).path)
@@ -412,5 +419,9 @@ final class ClipboardController: ObservableObject {
                 try? FileManager.default.removeItem(at: Self.imagesDir.appendingPathComponent(file))
             }
         }
+
+        // Persist the scrub immediately so a legacy credential is removed from
+        // disk, not merely hidden from this process's in-memory view.
+        if removedSecrets { save() }
     }
 }
