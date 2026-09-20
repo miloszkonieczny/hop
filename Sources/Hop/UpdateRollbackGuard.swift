@@ -29,7 +29,8 @@ enum UpdateRollbackGuard {
 
     /// The replacement app receives the acknowledgement path. Hop acknowledges
     /// only after the SAME 30-second window LaunchGuard already defines as a
-    /// stable launch (or on a clean user-requested termination before then).
+    /// stable launch. A clean early quit is tracked separately and does not
+    /// commit an unproven replacement.
     static func acknowledgeStableLaunchIfRequested() {
         guard let path = UpdateRollbackProtocol.acknowledgementPath(
             arguments: CommandLine.arguments
