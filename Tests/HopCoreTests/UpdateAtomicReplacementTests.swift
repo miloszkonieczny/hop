@@ -109,4 +109,73 @@ final class UpdateAtomicReplacementTests: XCTestCase {
         )
         XCTAssertTrue(FileManager.default.fileExists(atPath: existing.path))
     }
+    func testGuardRequestIsAcceptedOnlyForMatchingCanonicalTransaction() {
+        let cache = "/Users/test/Library/Caches/com.antonshakirov.minimo"
+        let plan = UpdateReplacementPlan(
+            targetPath: "/Applications/Hop.app",
+            cacheDirectory: cache,
+            transactionID: "ABC-123"
+        )
+        let request = UpdateRollbackProtocol.guardRequest(
+            arguments: ["Hop"] + plan.guardArguments(parentPID: 123)
+        )
+
+        XCTAssertNotNil(request)
+        XCTAssertTrue(UpdateRollbackProtocol.isValidGuardRequest(
+            request!,
+            productionTargetPath: "/Applications/Hop.app",
+            cacheDirectory: cache
+        ))
+    }
+
+    func testGuardRequestRejectsArbitraryTargetAndMismatchedState() {
+        let cache = "/Users/test/Library/Caches/com.antonshakirov.minimo"
+        let valid = UpdateReplacementPlan(
+            targetPath: "/Applications/Hop.app",
+            cacheDirectory: cache,
+            transactionID: "ABC-123"
+        )
+        let arbitrary = UpdateRollbackProtocol.GuardRequest(
+            parentPID: 123,
+            targetPath: "/Users/test/Documents/anything",
+            rollbackPath: valid.rollbackPath,
+            guardReadyPath: valid.guardReadyPath,
+            stableAcknowledgementPath: valid.stableAcknowledgementPath
+        )
+        XCTAssertFalse(UpdateRollbackProtocol.isValidGuardRequest(
+            arbitrary,
+            productionTargetPath: "/Applications/Hop.app",
+            cacheDirectory: cache
+        ))
+
+        let mismatched = UpdateRollbackProtocol.GuardRequest(
+            parentPID: 123,
+            targetPath: valid.targetPath,
+            rollbackPath: valid.rollbackPath,
+            guardReadyPath: cache + "/hop-update-transaction-OTHER/guard-ready",
+            stableAcknowledgementPath: valid.stableAcknowledgementPath
+        )
+        XCTAssertFalse(UpdateRollbackProtocol.isValidGuardRequest(
+            mismatched,
+            productionTargetPath: "/Applications/Hop.app",
+            cacheDirectory: cache
+        ))
+    }
+
+    func testAcknowledgementPathIsRestrictedToHopTransactionCache() {
+        let cache = "/Users/test/Library/Caches/com.antonshakirov.minimo"
+        XCTAssertTrue(UpdateRollbackProtocol.isValidAcknowledgementPath(
+            cache + "/hop-update-transaction-ABC/launch-stable",
+            cacheDirectory: cache
+        ))
+        XCTAssertFalse(UpdateRollbackProtocol.isValidAcknowledgementPath(
+            "/Users/test/Documents/launch-stable",
+            cacheDirectory: cache
+        ))
+        XCTAssertFalse(UpdateRollbackProtocol.isValidAcknowledgementPath(
+            cache + "/hop-update-transaction-ABC/arbitrary-file",
+            cacheDirectory: cache
+        ))
+    }
+
 }
