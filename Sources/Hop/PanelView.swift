@@ -85,6 +85,12 @@ struct PanelView: View {
     @AppStorage(KeepAwakeController.keepDisplayKey) private var awakeKeepDisplay = true
 
     @State private var screen: Screen
+    /// The fixed semantic shell is independent from the legacy tab storage.
+    /// `screen` is retained as the compatibility/source-tab context for module
+    /// actions while this selects what the user actually sees.
+    @State private var hopSpace: HopSpace
+    @State private var shellQuery = ""
+    @FocusState private var shellSearchFocused: Bool
     // nil → the overlay back button falls through to the restored space
     @State private var scrubBaseDuration: TimeInterval?
     @State private var scrubUnit: TimeInterval?
@@ -237,8 +243,9 @@ struct PanelView: View {
     init(initial: InitialScreen = .restore, standaloneSettings: Bool = false,
          previewModules: [String] = [], layoutTableOnly: Bool = false) {
         // The panel content view is built once at launch, so this resolves the
-        // restored space from UserDefaults directly.
+        // legacy source-tab context and the new semantic shell independently.
         _screen = State(initialValue: Self.resolve(initial))
+        _hopSpace = State(initialValue: Self.resolveHopSpace(initial))
         self.standaloneSettings = standaloneSettings
         self.previewModules = previewModules
         self.layoutTableOnly = layoutTableOnly
