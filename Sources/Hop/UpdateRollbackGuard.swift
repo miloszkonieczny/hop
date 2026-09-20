@@ -77,20 +77,12 @@ enum UpdateRollbackGuard {
             return 0
         }
 
-        // Launch the candidate now occupying the canonical target path and pass
-        // only the acknowledgement marker. Process avoids shell interpolation.
-        guard launch(
+        // Supervise the replacement through LaunchServices. open -W stays alive
+        // while the launched app does: an immediate crash therefore triggers an
+        // immediate rollback instead of waiting out the entire stability timer.
+        let stable = launchAndWaitForStableAcknowledgement(
             appPath: request.targetPath,
-            arguments: [
-                UpdateRollbackProtocol.acknowledgementFlag,
-                request.stableAcknowledgementPath,
-            ]
-        ) else {
-            return rollbackAndRelaunch(request)
-        }
-
-        let stable = waitForFile(
-            request.stableAcknowledgementPath,
+            acknowledgementPath: request.stableAcknowledgementPath,
             timeout: LaunchGuard.stableAfter + stableLaunchGrace
         )
         guard stable else { return rollbackAndRelaunch(request) }
@@ -119,7 +111,7 @@ enum UpdateRollbackGuard {
         // known-good old app again.
         try? FileManager.default.removeItem(atPath: request.rollbackPath)
         try? FileManager.default.removeItem(atPath: request.stateDirectoryPath)
-        return launch(appPath: request.targetPath, arguments: []) ? 0 : 4
+        return launchDetached(appPath: request.targetPath, arguments: []) ? 0 : 4
     }
 
     private static func cleanupSuccessfulOrCancelled(
@@ -130,7 +122,45 @@ enum UpdateRollbackGuard {
         try? fm.removeItem(atPath: request.stateDirectoryPath)
     }
 
-    private static func launch(appPath: String, arguments: [String]) -> Bool {
+    private static func launchAndWaitForStableAcknowledgement(
+        appPath: String,
+        acknowledgementPath: String,
+        timeout: TimeInterval
+    ) -> Bool {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        process.arguments = [
+            "-n",
+            "-W",
+            appPath,
+            "--args",
+            UpdateRollbackProtocol.acknowledgementFlag,
+            acknowledgementPath,
+        ]
+
+        do {
+            try process.run()
+        } catch {
+            return false
+        }
+
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if FileManager.default.fileExists(atPath: acknowledgementPath) {
+                // -W is only the waiting wrapper. Ending it after acknowledgement
+                // does not terminate the already-running application.
+                if process.isRunning { process.terminate() }
+                return true
+            }
+            if !process.isRunning { return false }
+            usleep(pollInterval)
+        }
+
+        if process.isRunning { process.terminate() }
+        return FileManager.default.fileExists(atPath: acknowledgementPath)
+    }
+
+    private static func launchDetached(appPath: String, arguments: [String]) -> Bool {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
         process.arguments = ["-n", appPath] + (arguments.isEmpty ? [] : ["--args"] + arguments)
