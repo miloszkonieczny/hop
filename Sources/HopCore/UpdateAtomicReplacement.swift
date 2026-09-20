@@ -36,6 +36,7 @@ public struct UpdateReplacementPlan: Equatable, Sendable {
     public let stateDirectory: String
     public let guardReadyPath: String
     public let stableAcknowledgementPath: String
+    public let cleanExitPath: String
 
     public init(
         targetPath: String,
@@ -54,6 +55,7 @@ public struct UpdateReplacementPlan: Equatable, Sendable {
         self.stateDirectory = state.path
         self.guardReadyPath = state.appendingPathComponent("guard-ready").path
         self.stableAcknowledgementPath = state.appendingPathComponent("launch-stable").path
+        self.cleanExitPath = state.appendingPathComponent("clean-exit").path
     }
 
     public func guardArguments(parentPID: Int32) -> [String] {
@@ -107,6 +109,13 @@ public enum UpdateRollbackProtocol {
               arguments.count > index + 1
         else { return nil }
         return arguments[index + 1]
+    }
+
+    public static func cleanExitPath(forAcknowledgementPath path: String) -> String {
+        URL(fileURLWithPath: standardized(path))
+            .deletingLastPathComponent()
+            .appendingPathComponent("clean-exit")
+            .path
     }
 
     /// Production guard invocations are deliberately path-constrained. This
