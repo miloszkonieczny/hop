@@ -344,6 +344,52 @@ final class VPNController: ObservableObject {
 
     // MARK: - The vendor's window
 
+    /// Personal-fork quick action: bring Proton VPN to the front without
+    /// automating its UI. Prefer the app that owns a macOS VPN configuration;
+    /// fall back to an installed Proton VPN application when Proton does not
+    /// expose a configuration through scutil.
+    @discardableResult
+    func openProtonVPN() -> Bool {
+        guard !Snapshot.active, !demo else { return false }
+
+        if let configuration = configurations.first(where: { configuration in
+            [
+                configuration.name,
+                configuration.appName ?? "",
+                configuration.bundleIdentifier ?? "",
+            ].contains { $0.localizedCaseInsensitiveContains("proton") }
+        }), configuration.bundleIdentifier != nil {
+            openApp(for: configuration)
+            return true
+        }
+
+        let fm = FileManager.default
+        let roots = [
+            URL(fileURLWithPath: "/Applications", isDirectory: true),
+            fm.homeDirectoryForCurrentUser.appendingPathComponent("Applications", isDirectory: true),
+        ]
+        for root in roots {
+            guard let apps = try? fm.contentsOfDirectory(
+                at: root,
+                includingPropertiesForKeys: nil,
+                options: [.skipsHiddenFiles]
+            ) else { continue }
+
+            if let proton = apps.first(where: { url in
+                let name = url.deletingPathExtension().lastPathComponent.lowercased()
+                return url.pathExtension.lowercased() == "app"
+                    && name.contains("proton")
+                    && name.contains("vpn")
+            }) {
+                let options = NSWorkspace.OpenConfiguration()
+                options.activates = true
+                NSWorkspace.shared.openApplication(at: proton, configuration: options)
+                return true
+            }
+        }
+        return false
+    }
+
     /// Brings up the app that owns this configuration. Nothing else in Hop needs
     /// the app — this is for the times you want the vendor's own screen, to pick
     /// a country or change a setting.
