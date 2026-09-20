@@ -6171,6 +6171,17 @@ is written the way its newest one is.
   the guard uses the same atomic `RENAME_SWAP` to put the old app back and then
   relaunches it. If even the rollback exchange fails, BOTH bundles are preserved;
   the guard never deletes the last known-good copy.
+- Because code may roll back during that stability window, any launch-time
+  persistent-data migration introduced by a release MUST remain readable by the
+  immediately previous release until the 30-second acknowledgement commits the
+  update. A schema change that cannot satisfy that rule must use a dual-readable
+  representation or defer its irreversible step until after update commitment.
+  Binary rollback without data compatibility is not a complete rollback.
+- On launch, transaction garbage collection is deliberately conservative.
+  A transaction is cleaned only when `launch-stable` proves it committed, or
+  when `guard-ready` was never written and therefore the atomic swap gate was
+  never reached. A ready-but-unacknowledged transaction is preserved intact;
+  it may still be active or may contain the only recovery copy.
 - The hidden guard/acknowledgement launch modes are path-constrained to
   `/Applications/Hop.app`, the matching hidden rollback sibling, and Hop's own
   cache transaction directory. They are not general-purpose rename/write
