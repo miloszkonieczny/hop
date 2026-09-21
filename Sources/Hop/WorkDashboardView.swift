@@ -508,8 +508,9 @@ struct WorkDashboardView: View {
 }
 
 
-/// Isolated from the rest of the Work dashboard so TimerEngine's 4 Hz heartbeat
-/// redraws only the clock card, not tasks, clipboard previews or app icons.
+/// Owns the Work timer's direct observation so timer-specific UI stays inside
+/// this card. AppModel's existing panel clock redraw policy remains unchanged for
+/// compatibility with the legacy full timer and other panel surfaces.
 private struct WorkFocusCard: View {
     @ObservedObject var engine: TimerEngine
     let presets: [Int]
