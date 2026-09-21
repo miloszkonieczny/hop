@@ -658,12 +658,14 @@ Back-to-Work row. Switching to Work normally clears that detail state and
 restores the dashboard. Thus the redesign MUST NOT make any advanced control
 unreachable.
 
-The timer heartbeat is isolated inside the Focus card. Its 4 Hz redraw MUST NOT
-rebuild task rows, clipboard previews or recent-app icons. Clipboard and
-RecentApps changes are observed directly by the dashboard; they are NOT forwarded
-through AppModel's broad panel redraw path. Clipboard one-line previews reuse
-`ClipPreviewCache`, and app icons use a small in-memory cache. This is part of
-the dashboard's performance contract, not optional polish.
+The Focus card owns its own direct `TimerEngine` observation so timer-specific
+view code stays inside that component. AppModel's pre-existing clock redraw path
+is intentionally left unchanged in this PR because the legacy full timer and
+other panel surfaces still rely on it. Clipboard and RecentApps changes ARE
+observed directly by the dashboard and are NOT forwarded through AppModel's broad
+panel redraw path. Clipboard one-line previews reuse `ClipPreviewCache`, and app
+icons use a small in-memory cache. This is the bounded redraw cleanup in this
+stage; replacing the legacy clock propagation is a separate architectural task.
 
 ### Switching a module off
 
