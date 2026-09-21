@@ -613,6 +613,43 @@ space regardless of the previously selected space. Hidden modules remain hidden
 and are never surfaced by the action palette. Unknown/user-created modules
 default to Tools so the semantic projection cannot make data unreachable.
 
+#### Work dashboard
+
+Work's normal landing is a compact dashboard rather than the old vertical stack
+of four full modules. It is a SUMMARY/CONTROL SURFACE over the same controllers,
+not a second productivity system.
+
+- **Focus** reads and controls the existing `TimerEngine`: current time,
+  start/pause, reset and up to three existing configured presets. The full timer
+  is one disclosure click away.
+- **Tasks** shows at most three active to-dos in the same display order as the
+  full list, including the user's "important first" preference. Checking a row
+  calls `TodosController.toggle`; no dashboard-only task state exists.
+- **Clipboard** shows at most the three newest already-persisted history rows.
+  Clicking one calls the existing `ClipboardController.copy`. The dashboard
+  therefore inherits ConcealedType + secret-detector protection and NEVER reads
+  the live pasteboard independently.
+- **Recent Apps** is a five-item local MRU of regular macOS applications. It
+  stores only bundle identifier, app name and app bundle path in UserDefaults:
+  no window/document title, URL, duration, keystroke or remote telemetry.
+  Missing app bundles are pruned on load and the dashboard exposes **clear**.
+- **Quick Actions** is initially the fixed personal set: native Screenshot
+  Toolbar, Capture Area, OCR, Open Proton VPN and Minimize. The actions are the
+  same typed `HopAction` objects used by Search actions; disabled modules remove
+  their corresponding quick action.
+- **Time Tracker** remains reachable as a compact disclosure row.
+
+A dashboard disclosure or targeted Work reopen temporarily replaces the
+dashboard with the FULL existing timer/to-dos/clipboard/tracker module and a
+Back-to-Work row. Switching to Work normally clears that detail state and
+restores the dashboard. Thus the redesign MUST NOT make any advanced control
+unreachable.
+
+The timer heartbeat is isolated inside the Focus card. Its 4 Hz redraw MUST NOT
+rebuild task rows, clipboard previews or recent-app icons. Clipboard one-line
+previews reuse `ClipPreviewCache`, and app icons use a small in-memory cache.
+This is part of the dashboard's performance contract, not optional polish.
+
 ### Switching a module off
 
 The switch is in three places and they are one answer: the power button on the
