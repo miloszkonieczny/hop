@@ -43,11 +43,6 @@ final class RecentAppsController: ObservableObject {
         }
     }
 
-    deinit {
-        if let activationObserver {
-            NSWorkspace.shared.notificationCenter.removeObserver(activationObserver)
-        }
-    }
 
     func open(_ application: RecentApplication) {
         guard !demo, !Snapshot.active else { return }
