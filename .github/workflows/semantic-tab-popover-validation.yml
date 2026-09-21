@@ -1,0 +1,66 @@
+name: Semantic Tab Popover Validation
+
+on:
+  push:
+    branches:
+      - validation/semantic-tab-popover-stability
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate semantic tab popover fix
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact fix source
+        uses: actions/checkout@v7
+        with:
+          ref: 764c5be8de1577c7c5d07f3d2a979078b595e4ff
+          persist-credentials: false
+
+      - name: Verify source and toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="764c5be8de1577c7c5d07f3d2a979078b595e4ff"
+          actual="$(git rev-parse HEAD)"
+          echo "expected source: $expected"
+          echo "actual source:   $actual"
+          test "$actual" = "$expected"
+          sw_vers
+          swift --version
+
+      - name: Run repository checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/checks.sh
+
+      - name: Build isolated Hop Dev app
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/build-app.sh --dev
+          test -d "dist/Hop Dev.app"
+
+      - name: Package and fingerprint
+        shell: bash
+        run: |
+          set -euo pipefail
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "dist/Hop Dev.app/Contents/Info.plist"
+          codesign -dv --verbose=2 "dist/Hop Dev.app" 2>&1 || true
+          ditto -c -k --sequesterRsrc --keepParent "dist/Hop Dev.app" "Hop-Dev-Semantic-Tab-Fix-764c5be.zip"
+          shasum -a 256 "Hop-Dev-Semantic-Tab-Fix-764c5be.zip" | tee "Hop-Dev-Semantic-Tab-Fix-764c5be.sha256"
+
+      - name: Upload validation artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: hop-dev-semantic-tab-fix-764c5be
+          path: |
+            Hop-Dev-Semantic-Tab-Fix-764c5be.zip
+            Hop-Dev-Semantic-Tab-Fix-764c5be.sha256
+          retention-days: 7
+          if-no-files-found: error
