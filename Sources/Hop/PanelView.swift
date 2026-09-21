@@ -3342,6 +3342,9 @@ struct PanelView: View {
         case .showTodos:
             selectHopSpace(.work, persist: true, preferredModule: "todos")
 
+        case .showTracker:
+            selectHopSpace(.work, persist: true, preferredModule: "tracker")
+
         case .openConverter:
             closePanelThen { model.openConverterWindow?() }
 
