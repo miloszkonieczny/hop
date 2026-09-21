@@ -119,6 +119,9 @@ struct PanelView: View {
     // The clipboard search field is focused — same keyboard-capture concern:
     // its ⌘V must paste into the search, not the converter sharing this space.
     @State private var clipboardSearching = false
+    // Work's compact one-line task capture is also a real text field. While it
+    // owns focus, panel-level timer/converter shortcuts must stand down.
+    @State private var workQuickAddEditing = false
     @State private var languageMenuTarget: MenuPickTarget?
     // one hand-rolled drag moves a module chip between/within columns; a header
     // drag reorders whole tab columns. Column and chip frames are measured in
@@ -375,6 +378,7 @@ struct PanelView: View {
         .onChange(of: trackerEditing) { _, _ in syncKeyboardCapture() }
         .onChange(of: todosEditing) { _, _ in syncKeyboardCapture() }
         .onChange(of: clipboardSearching) { _, _ in syncKeyboardCapture() }
+        .onChange(of: workQuickAddEditing) { _, _ in syncKeyboardCapture() }
         .onChange(of: shellSearchFocused) { _, _ in
             syncKeyboardCapture()
             if shellSearchFocused { shellSelectionIndex = 0 }
@@ -384,6 +388,7 @@ struct PanelView: View {
             shellSearchFocused = false
             shellQuery = ""
             shellSelectionIndex = 0
+            workQuickAddEditing = false
             model.panelKeyboardCaptured = false
             // A normal left-click / hotkey reopen does not fire the openTab
             // handler (openTab stays nil), and @State survives the popover
@@ -1271,7 +1276,8 @@ struct PanelView: View {
                 openModule: { module in
                     selectHopSpace(.work, persist: true, preferredModule: module)
                 },
-                closePanel: { model.closePanel?() }
+                closePanel: { model.closePanel?() },
+                taskInputEditingChanged: { workQuickAddEditing = $0 }
             )
         }
     }
@@ -1425,7 +1431,7 @@ struct PanelView: View {
     /// keyboard back to the app underneath.
     private func syncKeyboardCapture() {
         let captured = editUnit != nil || trackerEditing || todosEditing
-            || clipboardSearching || shellSearchFocused
+            || clipboardSearching || workQuickAddEditing || shellSearchFocused
         model.panelKeyboardCaptured = captured
         if !captured { model.panelFocusChanged?() }
     }
@@ -1460,7 +1466,7 @@ struct PanelView: View {
         // keyboard: Return commits the field's own text (and ⌘V pastes into it),
         // it must NOT drive the timer or the converter. Bailing here lets the key
         // fall through to the TextField's own paste / onSubmit.
-        guard !trackerEditing, !todosEditing, !clipboardSearching
+        guard !trackerEditing, !todosEditing, !clipboardSearching, !workQuickAddEditing
         else { return .ignored }
 
         // Cmd+V / Cmd+Shift+V feed the clipboard into the converter, exactly
