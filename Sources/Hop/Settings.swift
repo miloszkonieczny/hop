@@ -58,6 +58,10 @@ enum SettingsKey {
     /// Work-dashboard recent-app MRU. ON by default; turning it off immediately
     /// clears the locally stored list and stops recording activations.
     static let workRecentApps = "workRecentApps"
+    /// Comma-separated typed HopAction IDs shown in the Tools favorites area.
+    /// Special markers distinguish first-run defaults from an intentionally
+    /// empty favorites set.
+    static let toolsFavoriteActions = "toolsFavoriteActions"
     /// Which onboarding step to reopen on. SPEC: docs/spec.md — "Onboarding".
     static let onboardingStep = "onboardingStep"
     static let onboardingWantsApps = "onboardingWantsApps"
