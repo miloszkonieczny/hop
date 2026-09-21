@@ -92,6 +92,10 @@ struct PanelView: View {
     /// A targeted reopen (for example the eyedropper returning a colour) pins
     /// that module to the top of its semantic space for this opening.
     @State private var preferredModuleID: String?
+    /// Work normally shows its compact dashboard. Targeted module opens and the
+    /// dashboard's disclosure buttons temporarily replace it with the full
+    /// existing module, preserving every advanced control.
+    @State private var workDetailModuleID: String?
     @State private var shellQuery = ""
     @State private var shellSelectionIndex = 0
     @FocusState private var shellSearchFocused: Bool
@@ -251,6 +255,7 @@ struct PanelView: View {
         _screen = State(initialValue: Self.resolve(initial))
         _hopSpace = State(initialValue: Self.resolveHopSpace(initial))
         _preferredModuleID = State(initialValue: Self.preferredModule(for: initial))
+        _workDetailModuleID = State(initialValue: Self.initialWorkDetail(for: initial))
         self.standaloneSettings = standaloneSettings
         self.previewModules = previewModules
         self.layoutTableOnly = layoutTableOnly
@@ -1212,7 +1217,66 @@ struct PanelView: View {
     }
 
     @ViewBuilder private var shellSpaceContent: some View {
-        let placements = collapsedPlacements(displayPlacements(in: hopSpace))
+        if hopSpace == .work {
+            workSpaceContent
+        } else {
+            standardSpaceContent(hopSpace)
+        }
+    }
+
+    @ViewBuilder private var workSpaceContent: some View {
+        if let detail = workDetailModuleID,
+           let placement = visiblePlacements(in: .work).first(where: {
+               $0.moduleID == detail
+           }) {
+            VStack(spacing: 12) {
+                Button {
+                    workDetailModuleID = nil
+                    preferredModuleID = nil
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 9, weight: .semibold))
+                        Text("Work")
+                            .font(Theme.mono(9, weight: .semibold))
+                        Spacer()
+                        Text(moduleTitle(detail))
+                            .font(Theme.mono(8))
+                            .foregroundStyle(Theme.textTertiary)
+                    }
+                    .foregroundStyle(Theme.textSecondary)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 26)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .hoverHighlight(5)
+
+                Rectangle()
+                    .fill(Theme.divider)
+                    .frame(height: 1)
+
+                moduleBlock(placement.moduleID, in: placement.sourceTabID)
+            }
+        } else {
+            WorkDashboardView(
+                engine: model.engine,
+                todos: model.todos,
+                clipboard: model.clipboard,
+                recentApps: model.recentApps,
+                visibleModules: currentShellModuleKeys,
+                quickActions: workDashboardQuickActions,
+                executeAction: { executeHopAction($0) },
+                openModule: { module in
+                    selectHopSpace(.work, persist: true, preferredModule: module)
+                },
+                closePanel: { model.closePanel?() }
+            )
+        }
+    }
+
+    @ViewBuilder private func standardSpaceContent(_ space: HopSpace) -> some View {
+        let placements = collapsedPlacements(displayPlacements(in: space))
         if placements.isEmpty {
             Text(t(.tabEmptyHint))
                 .font(Theme.mono(11))
@@ -3088,6 +3152,13 @@ struct PanelView: View {
         return nil
     }
 
+    private static func initialWorkDetail(for initial: InitialScreen) -> String? {
+        guard case .spaceContaining(let module) = initial,
+              HopSpace.containing(module: module) == .work
+        else { return nil }
+        return module
+    }
+
     private func mutateTabs(_ body: (inout PanelTabsModel) -> Void) {
         var model = tabsModel
         body(&model)
@@ -3106,6 +3177,18 @@ struct PanelView: View {
 
     private var currentActionMatches: [HopAction] {
         HopActionCatalog.search(shellQuery, in: availableHopActions, limit: 8)
+    }
+
+    private var workDashboardQuickActions: [HopAction] {
+        let ids = [
+            "capture.screenshotToolbar",
+            "capture.area",
+            "capture.ocr",
+            "network.protonVPN",
+            "window.minimize",
+        ]
+        let byID = Dictionary(uniqueKeysWithValues: availableHopActions.map { ($0.id, $0) })
+        return ids.compactMap { byID[$0] }
     }
 
     private var currentShellModuleKeys: Set<String> {
@@ -3159,6 +3242,7 @@ struct PanelView: View {
     ) {
         hopSpace = space
         preferredModuleID = preferredModule
+        workDetailModuleID = space == .work ? preferredModule : nil
         shellQuery = ""
         if persist {
             UserDefaults.standard.set(space.rawValue, forKey: SettingsKey.hopSpace)
@@ -3236,11 +3320,11 @@ struct PanelView: View {
         case .startTimer25:
             model.engine.setPreset(minutes: 25)
             model.engine.start()
-            selectHopSpace(.work, persist: true, preferredModule: "timer")
+            selectHopSpace(.work, persist: true)
 
         case .toggleTimer:
             model.engine.toggle()
-            selectHopSpace(.work, persist: true, preferredModule: "timer")
+            selectHopSpace(.work, persist: true)
 
         case .openProtonVPN:
             closePanelThen {
