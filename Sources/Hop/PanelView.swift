@@ -97,6 +97,8 @@ struct PanelView: View {
     /// dashboard's disclosure buttons temporarily replace it with the full
     /// existing module, preserving every advanced control.
     @State private var workDetailModuleID: String?
+    /// Mac uses the same dashboard → full-module drilldown pattern as Work.
+    @State private var macDetailModuleID: String?
     @State private var shellQuery = ""
     @State private var shellSelectionIndex = 0
     @FocusState private var shellSearchFocused: Bool
@@ -260,6 +262,7 @@ struct PanelView: View {
         _hopSpace = State(initialValue: Self.resolveHopSpace(initial))
         _preferredModuleID = State(initialValue: Self.preferredModule(for: initial))
         _workDetailModuleID = State(initialValue: Self.initialWorkDetail(for: initial))
+        _macDetailModuleID = State(initialValue: Self.initialMacDetail(for: initial))
         self.standaloneSettings = standaloneSettings
         self.previewModules = previewModules
         self.layoutTableOnly = layoutTableOnly
@@ -1223,10 +1226,13 @@ struct PanelView: View {
     }
 
     @ViewBuilder private var shellSpaceContent: some View {
-        if hopSpace == .work {
+        switch hopSpace {
+        case .work:
             workSpaceContent
-        } else {
-            standardSpaceContent(hopSpace)
+        case .mac:
+            macSpaceContent
+        case .tools:
+            standardSpaceContent(.tools)
         }
     }
 
@@ -1279,6 +1285,62 @@ struct PanelView: View {
                 },
                 closePanel: { model.closePanel?() },
                 taskInputEditingChanged: { workQuickAddEditing = $0 }
+            )
+        }
+    }
+
+    @ViewBuilder private var macSpaceContent: some View {
+        if let detail = macDetailModuleID,
+           let placement = visiblePlacements(in: .mac).first(where: {
+               $0.moduleID == detail
+           }) {
+            VStack(spacing: 12) {
+                Button {
+                    macDetailModuleID = nil
+                    preferredModuleID = nil
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 9, weight: .semibold))
+                        Text("Mac")
+                            .font(Theme.mono(9, weight: .semibold))
+                        Spacer()
+                        Text(moduleTitle(detail))
+                            .font(Theme.mono(8))
+                            .foregroundStyle(Theme.textTertiary)
+                    }
+                    .foregroundStyle(Theme.textSecondary)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 26)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .hoverHighlight(5)
+
+                Rectangle()
+                    .fill(Theme.divider)
+                    .frame(height: 1)
+
+                moduleBlock(placement.moduleID, in: placement.sourceTabID)
+            }
+        } else {
+            MacDashboardView(
+                stats: model.stats,
+                speedTest: model.speedTest,
+                vpn: model.vpn,
+                keepAwake: model.keepAwake,
+                keyboardLock: model.keyboardLock,
+                processes: model.macProcesses,
+                visibleModules: currentShellModuleKeys,
+                openModule: { module in
+                    selectHopSpace(.mac, persist: true, preferredModule: module)
+                },
+                openProtonVPN: {
+                    guard let action = availableHopActions.first(where: {
+                        $0.id == "network.protonVPN"
+                    }) else { return }
+                    executeHopAction(action)
+                }
             )
         }
     }
@@ -3167,6 +3229,13 @@ struct PanelView: View {
         return module
     }
 
+    private static func initialMacDetail(for initial: InitialScreen) -> String? {
+        guard case .spaceContaining(let module) = initial,
+              HopSpace.containing(module: module) == .mac
+        else { return nil }
+        return module
+    }
+
     private func mutateTabs(_ body: (inout PanelTabsModel) -> Void) {
         var model = tabsModel
         body(&model)
@@ -3257,6 +3326,7 @@ struct PanelView: View {
         hopSpace = space
         preferredModuleID = preferredModule
         workDetailModuleID = space == .work ? preferredModule : nil
+        macDetailModuleID = space == .mac ? preferredModule : nil
         shellQuery = ""
         if persist {
             UserDefaults.standard.set(space.rawValue, forKey: SettingsKey.hopSpace)

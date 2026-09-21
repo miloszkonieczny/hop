@@ -4567,6 +4567,61 @@ The shape below is what an entry looks like when one is earned.
   never seen is a no-op. Its row carries a one-line detail, like archives: the
   word "apps" alone does not say what the module is.
 
+
+#### Mac dashboard
+
+Mac's normal landing is a compact operational dashboard over the existing
+system/VPN/speed/awake/keyboard/torrent controllers. It is a SUMMARY/CONTROL
+SURFACE, not a replacement data collector.
+
+The dashboard mirrors the accepted two-column "Mac at a glance" design inside
+Hop's existing 368pt popover:
+
+- **Header health pill** follows `ProcessInfo.thermalState` through
+  `ThermalLevel`. Nominal/fair = Normal, serious = High, critical = Critical.
+  This is the health verdict; raw temperatures are informational only.
+- **CPU Usage** shows the existing CPU load sample plus recent history and the
+  processor brand when macOS exposes it.
+- **Memory Pressure** shows macOS's pressure verdict (Normal/Warning/Critical),
+  not a fabricated percentage. Used/physical RAM is shown underneath and the
+  mini trend uses the existing memory-share history.
+- **CPU/GPU Temperature** reuse the existing private-HID sensor readings and
+  degrade honestly to "—" / "No dedicated sensor" where Apple does not expose
+  one. The dashboard MUST NOT invent red/yellow temperature thresholds.
+- **Network** is the existing live interface throughput converted to Mbps for
+  compact readability.
+- **Battery** is the existing IOKit battery reading: charge, charging state,
+  temperature and calibrated health when available.
+- **Top CPU / Top RAM process** are sampled ONLY while the Mac dashboard is
+  visible using `ps -axo pid=,pcpu=,rss=,comm=`. Hop itself is excluded. The
+  app stores nothing: no process history, arguments, window titles, document
+  names or telemetry. Clicking either card opens Activity Monitor.
+- **Proton VPN** reflects a Proton-owned macOS VPN configuration when one is
+  visible. The button reuses the typed `network.protonVPN` action and remains
+  strictly open-only: no connect/disconnect, server choice, service enabling or
+  credentials.
+- **Internet Speed** reuses `SpeedTestController` and Apple's
+  `/usr/bin/networkQuality`; live values replace the last saved result while a
+  test is running.
+- **Keep Awake / Keyboard / Torrents / Details** are compact disclosure controls
+  to the full existing modules. They do not guess a duration, lock the keyboard,
+  or start a torrent from the dashboard.
+
+Every card tied to an existing module disappears when that module is switched
+off. In particular, switching the system module off means no process sampling
+and no system cards: "off is off everywhere" still governs the personalized
+shell.
+
+A dashboard disclosure or targeted Mac reopen temporarily replaces the dashboard
+with the FULL existing module plus a Back-to-Mac row. VPN and speed-test cards
+also expose explicit disclosure chevrons, so the redesigned landing cannot make
+advanced configuration/results unreachable.
+
+`MacProcessSummaryController` has no background life of its own: start on Mac
+dashboard appearance, stop on disappearance, 5-second cadence, no persistence.
+The pure parsing/ranking logic lives in HopCore and is regression-tested.
+
+
 ## Agent bridge (files and hop:// links)
 
 Hop can be READ and DRIVEN from outside — by the user's own AI agent, a script,

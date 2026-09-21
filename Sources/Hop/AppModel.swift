@@ -32,6 +32,7 @@ final class AppModel: ObservableObject {
     let uninstall = UninstallController()
     let appShelves: AppShelvesController
     let recentApps: RecentAppsController
+    let macProcesses = MacProcessSummaryController()
 
     /// Last time the user actively touched Hop. The updater installs a found
     /// release only after a long enough quiet gap (see UpdateInstallPolicy),
