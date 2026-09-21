@@ -29,6 +29,7 @@ final class HopActionTests: XCTestCase {
         XCTAssertEqual(HopActionCatalog.search("ocr").first?.id, "capture.ocr")
         XCTAssertEqual(HopActionCatalog.search("min").first?.id, "window.minimize")
         XCTAssertEqual(HopActionCatalog.search("vpn").first?.id, "network.protonVPN")
+        XCTAssertEqual(HopActionCatalog.search("tracker").first?.id, "navigate.tracker")
     }
 
     func testMultiTokenTimerQueryIsDeterministic() {
