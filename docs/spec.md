@@ -619,24 +619,37 @@ Work's normal landing is a compact dashboard rather than the old vertical stack
 of four full modules. It is a SUMMARY/CONTROL SURFACE over the same controllers,
 not a second productivity system.
 
+The visual order is deliberate: **Focus → Quick Actions → Tasks → Clipboard →
+Recent Apps → Time Tracker**. High-frequency actions stay above passive history.
+
 - **Focus** reads and controls the existing `TimerEngine`: current time,
   start/pause, reset and up to three existing configured presets. The full timer
   is one disclosure click away.
+- **Quick Actions** is one compact horizontal row, initially the fixed personal
+  set: native Screenshot Toolbar, Capture Area, OCR, Open Proton VPN and
+  Minimize. The actions are the SAME typed `HopAction` objects used by Search
+  actions; disabled modules remove their corresponding quick action. The
+  dashboard does not invent or display a fake fixed keyboard shortcut — Search
+  actions continues to use the user's configured panel hotkey.
 - **Tasks** shows at most three active to-dos in the same display order as the
   full list, including the user's "important first" preference. Checking a row
-  calls `TodosController.toggle`; no dashboard-only task state exists.
-- **Clipboard** shows at most the three newest already-persisted history rows.
-  Clicking one calls the existing `ClipboardController.copy`. The dashboard
-  therefore inherits ConcealedType + secret-detector protection and NEVER reads
-  the live pasteboard independently.
-- **Recent Apps** is a five-item local MRU of regular macOS applications. It
-  stores only bundle identifier, app name and app bundle path in UserDefaults:
-  no window/document title, URL, duration, keystroke or remote telemetry.
-  Missing app bundles are pruned on load and the dashboard exposes **clear**.
-- **Quick Actions** is initially the fixed personal set: native Screenshot
-  Toolbar, Capture Area, OCR, Open Proton VPN and Minimize. The actions are the
-  same typed `HopAction` objects used by Search actions; disabled modules remove
-  their corresponding quick action.
+  calls `TodosController.toggle`; no dashboard-only task state exists. A compact
+  **+** opens a single-line quick-capture field that commits through
+  `TodosController.add`. While that field is focused, panel-level timer and
+  converter shortcuts MUST stand down exactly as they do for the full To-Dos
+  editor.
+- **Clipboard** shows at most the three newest already-persisted history rows in
+  a deliberately compact card. Clicking one calls the existing
+  `ClipboardController.copy`. The dashboard therefore inherits ConcealedType +
+  secret-detector protection and NEVER reads the live pasteboard independently.
+- **Recent Apps** is visually subordinate: at most four app icons in a compact
+  row, backed by a five-item local MRU of regular macOS applications. It stores
+  only bundle identifier, app name and app bundle path in UserDefaults: no
+  window/document title, URL, duration, keystroke or remote telemetry. Missing
+  app bundles are pruned on load and the dashboard exposes **clear**.
+  Recent-app tracking is explicitly switchable (in the dashboard and General
+  settings). Turning it OFF immediately erases the stored MRU and ignores future
+  application activations until re-enabled.
 - **Time Tracker** remains reachable as a compact disclosure row.
 
 A dashboard disclosure or targeted Work reopen temporarily replaces the
@@ -646,9 +659,11 @@ restores the dashboard. Thus the redesign MUST NOT make any advanced control
 unreachable.
 
 The timer heartbeat is isolated inside the Focus card. Its 4 Hz redraw MUST NOT
-rebuild task rows, clipboard previews or recent-app icons. Clipboard one-line
-previews reuse `ClipPreviewCache`, and app icons use a small in-memory cache.
-This is part of the dashboard's performance contract, not optional polish.
+rebuild task rows, clipboard previews or recent-app icons. Clipboard and
+RecentApps changes are observed directly by the dashboard; they are NOT forwarded
+through AppModel's broad panel redraw path. Clipboard one-line previews reuse
+`ClipPreviewCache`, and app icons use a small in-memory cache. This is part of
+the dashboard's performance contract, not optional polish.
 
 ### Switching a module off
 
