@@ -60,6 +60,8 @@ struct PanelView: View {
     @AppStorage(SettingsKey.todoRemindMark) private var todoRemindMark = true
     @AppStorage(SettingsKey.todoImportantOnTop) private var todoImportantOnTop = false
     @AppStorage(SettingsKey.workRecentApps) private var workRecentApps = true
+    @AppStorage(SettingsKey.toolsFavoriteActions)
+    private var toolsFavoriteActionsRaw = ToolsFavorites.defaultMarker
     @AppStorage(SettingsKey.trackerImportantOnTop) private var trackerImportantOnTop = true
     @AppStorage(SettingsKey.firstWeekday) private var firstWeekday = FirstWeekday.auto
     @AppStorage(VPNController.visibleRowsKey) private var vpnVisibleRows = VPNController.defaultVisibleRows
@@ -99,6 +101,8 @@ struct PanelView: View {
     @State private var workDetailModuleID: String?
     /// Mac uses the same dashboard → full-module drilldown pattern as Work.
     @State private var macDetailModuleID: String?
+    /// Tools uses an action-first dashboard while preserving every full module.
+    @State private var toolsDetailModuleID: String?
     @State private var shellQuery = ""
     @State private var shellSelectionIndex = 0
     @FocusState private var shellSearchFocused: Bool
@@ -263,6 +267,7 @@ struct PanelView: View {
         _preferredModuleID = State(initialValue: Self.preferredModule(for: initial))
         _workDetailModuleID = State(initialValue: Self.initialWorkDetail(for: initial))
         _macDetailModuleID = State(initialValue: Self.initialMacDetail(for: initial))
+        _toolsDetailModuleID = State(initialValue: Self.initialToolsDetail(for: initial))
         self.standaloneSettings = standaloneSettings
         self.previewModules = previewModules
         self.layoutTableOnly = layoutTableOnly
@@ -1232,7 +1237,7 @@ struct PanelView: View {
         case .mac:
             macSpaceContent
         case .tools:
-            standardSpaceContent(.tools)
+            toolsSpaceContent
         }
     }
 
@@ -1340,6 +1345,54 @@ struct PanelView: View {
                         $0.id == "network.protonVPN"
                     }) else { return }
                     executeHopAction(action)
+                }
+            )
+        }
+    }
+
+    @ViewBuilder private var toolsSpaceContent: some View {
+        if let detail = toolsDetailModuleID,
+           let placement = visiblePlacements(in: .tools).first(where: {
+               $0.moduleID == detail
+           }) {
+            VStack(spacing: 12) {
+                Button {
+                    toolsDetailModuleID = nil
+                    preferredModuleID = nil
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 9, weight: .semibold))
+                        Text("Tools")
+                            .font(Theme.mono(9, weight: .semibold))
+                        Spacer()
+                        Text(moduleTitle(detail))
+                            .font(Theme.mono(8))
+                            .foregroundStyle(Theme.textTertiary)
+                    }
+                    .foregroundStyle(Theme.textSecondary)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 26)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .hoverHighlight(5)
+
+                Rectangle()
+                    .fill(Theme.divider)
+                    .frame(height: 1)
+
+                moduleBlock(placement.moduleID, in: placement.sourceTabID)
+            }
+        } else {
+            ToolsDashboardView(
+                availableActions: toolsDashboardActions,
+                favoriteIDs: toolsFavoriteIDs,
+                modules: toolsDashboardModules,
+                executeAction: { executeHopAction($0) },
+                toggleFavorite: { toggleToolsFavorite($0.id) },
+                openModule: { module in
+                    selectHopSpace(.tools, persist: true, preferredModule: module)
                 }
             )
         }
@@ -3236,6 +3289,13 @@ struct PanelView: View {
         return module
     }
 
+    private static func initialToolsDetail(for initial: InitialScreen) -> String? {
+        guard case .spaceContaining(let module) = initial,
+              HopSpace.containing(module: module) == .tools
+        else { return nil }
+        return module
+    }
+
     private func mutateTabs(_ body: (inout PanelTabsModel) -> Void) {
         var model = tabsModel
         body(&model)
@@ -3254,6 +3314,45 @@ struct PanelView: View {
 
     private var currentActionMatches: [HopAction] {
         HopActionCatalog.search(shellQuery, in: availableHopActions, limit: 8)
+    }
+
+    private var toolsDashboardActions: [HopAction] {
+        availableHopActions.filter { $0.space == .tools }
+    }
+
+    private var allToolsActionIDs: Set<String> {
+        Set(HopActionCatalog.all.filter { $0.space == .tools }.map(\.id))
+    }
+
+    private var toolsFavoriteIDs: [String] {
+        ToolsFavorites.resolved(
+            raw: toolsFavoriteActionsRaw,
+            validIDs: allToolsActionIDs
+        )
+    }
+
+    private var toolsDashboardModules: [ToolsDashboardModule] {
+        var seen: Set<String> = []
+        return visiblePlacements(in: .tools).compactMap { placement in
+            guard placement.moduleID != Self.toolsRowKey,
+                  seen.insert(placement.moduleID).inserted
+            else { return nil }
+
+            return ToolsDashboardModule(
+                id: placement.moduleID,
+                title: moduleTitle(placement.moduleID),
+                systemImage: moduleGlyph(placement.moduleID)
+            )
+        }
+    }
+
+    private func toggleToolsFavorite(_ id: String) {
+        let next = ToolsFavorites.toggling(
+            id,
+            in: toolsFavoriteIDs,
+            validIDs: allToolsActionIDs
+        )
+        toolsFavoriteActionsRaw = ToolsFavorites.encoded(next)
     }
 
     private var workDashboardQuickActions: [HopAction] {
@@ -3327,6 +3426,7 @@ struct PanelView: View {
         preferredModuleID = preferredModule
         workDetailModuleID = space == .work ? preferredModule : nil
         macDetailModuleID = space == .mac ? preferredModule : nil
+        toolsDetailModuleID = space == .tools ? preferredModule : nil
         shellQuery = ""
         if persist {
             UserDefaults.standard.set(space.rawValue, forKey: SettingsKey.hopSpace)
@@ -5412,6 +5512,8 @@ struct PanelView: View {
         case Self.appsChoice: return "square.grid.3x3"
         case "archive": return "archivebox"
         case "uninstall": return "trash"
+        case "convert": return "arrow.triangle.2.circlepath.doc.on.clipboard"
+        case "windows": return "rectangle.split.2x1"
         case "keyboard": return "keyboard"
         case "color": return "paintpalette"
         case "ocr": return "text.viewfinder"
