@@ -264,7 +264,20 @@ struct MacDashboardView: View {
     private var vpnCard: some View {
         dashboardCard {
             VStack(alignment: .leading, spacing: 7) {
-                cardHeader("Proton VPN", symbol: "lock.shield", accent: Theme.accentCyan)
+                HStack(spacing: 4) {
+                    cardHeader("Proton VPN", symbol: "lock.shield", accent: Theme.accentCyan)
+                    Button {
+                        openModule("vpn")
+                    } label: {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 8, weight: .semibold))
+                            .foregroundStyle(Theme.textTertiary)
+                            .frame(width: 18, height: 18)
+                    }
+                    .buttonStyle(.plain)
+                    .hoverHighlight(4)
+                    .help("Open full VPN module")
+                }
 
                 HStack(spacing: 6) {
                     Circle()
@@ -299,7 +312,20 @@ struct MacDashboardView: View {
     private var speedCard: some View {
         dashboardCard {
             VStack(alignment: .leading, spacing: 7) {
-                cardHeader("Internet Speed", symbol: "speedometer", accent: Theme.accentBlue)
+                HStack(spacing: 4) {
+                    cardHeader("Internet Speed", symbol: "speedometer", accent: Theme.accentBlue)
+                    Button {
+                        openModule("speedtest")
+                    } label: {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 8, weight: .semibold))
+                            .foregroundStyle(Theme.textTertiary)
+                            .frame(width: 18, height: 18)
+                    }
+                    .buttonStyle(.plain)
+                    .hoverHighlight(4)
+                    .help("Open full speed-test module")
+                }
 
                 HStack(spacing: 10) {
                     speedValue(
@@ -350,6 +376,16 @@ struct MacDashboardView: View {
                     active: keyboardLock.isLocked
                 ) {
                     openModule("keyboard")
+                }
+            }
+
+            if visibleModules.contains("torrent") {
+                controlButton(
+                    title: "Torrents",
+                    symbol: "arrow.down.circle",
+                    active: false
+                ) {
+                    openModule("torrent")
                 }
             }
 
@@ -699,10 +735,21 @@ private enum HardwareIdentity {
         var size = 0
         guard sysctlbyname("machdep.cpu.brand_string", nil, &size, nil, 0) == 0,
               size > 1 else { return nil }
+
         var buffer = [CChar](repeating: 0, count: size)
-        guard sysctlbyname("machdep.cpu.brand_string", &buffer, &size, nil, 0) == 0 else {
-            return nil
+        let status = buffer.withUnsafeMutableBytes { bytes in
+            sysctlbyname(
+                "machdep.cpu.brand_string",
+                bytes.baseAddress,
+                &size,
+                nil,
+                0
+            )
         }
-        return String(cString: buffer)
+        guard status == 0 else { return nil }
+        return buffer.withUnsafeBufferPointer { pointer in
+            guard let base = pointer.baseAddress else { return nil }
+            return String(cString: base)
+        }
     }()
 }
