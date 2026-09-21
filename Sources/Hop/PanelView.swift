@@ -3422,6 +3422,10 @@ struct PanelView: View {
         persist: Bool,
         preferredModule: String? = nil
     ) {
+        // This is in-popover navigation, not an outside click. Tell the
+        // controller before replacing content so its keyboard-focus handoff
+        // cannot collapse the transient popover on the same interaction.
+        model.panelSemanticNavigation?()
         hopSpace = space
         preferredModuleID = preferredModule
         workDetailModuleID = space == .work ? preferredModule : nil
