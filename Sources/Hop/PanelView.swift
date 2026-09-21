@@ -59,6 +59,7 @@ struct PanelView: View {
     @AppStorage(SettingsKey.todoRemindSound) private var todoRemindSound = true
     @AppStorage(SettingsKey.todoRemindMark) private var todoRemindMark = true
     @AppStorage(SettingsKey.todoImportantOnTop) private var todoImportantOnTop = false
+    @AppStorage(SettingsKey.workRecentApps) private var workRecentApps = true
     @AppStorage(SettingsKey.trackerImportantOnTop) private var trackerImportantOnTop = true
     @AppStorage(SettingsKey.firstWeekday) private var firstWeekday = FirstWeekday.auto
     @AppStorage(VPNController.visibleRowsKey) private var vpnVisibleRows = VPNController.defaultVisibleRows
@@ -4415,6 +4416,27 @@ struct PanelView: View {
                     .font(Theme.mono(9))
                     .foregroundStyle(Theme.textTertiary)
             }
+            }
+
+            SettingsGroupLabel(title: "Work dashboard")
+                .padding(.top, 8)
+            SettingsCard {
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack {
+                        Text("Recent apps")
+                            .font(Theme.mono(12))
+                            .foregroundStyle(Theme.textPrimary)
+                        Spacer()
+                        Theme.MiniSwitch(isOn: $workRecentApps)
+                            .onChange(of: workRecentApps) { _, on in
+                                model.recentApps.setEnabled(on)
+                            }
+                    }
+                    Text("Keep a local list of recently activated apps for quick access. Turning this off immediately erases the stored list.")
+                        .font(Theme.mono(9))
+                        .foregroundStyle(Theme.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
     }
