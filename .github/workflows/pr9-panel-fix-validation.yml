@@ -1,0 +1,66 @@
+name: PR9 Panel Fix Validation
+
+on:
+  push:
+    branches:
+      - fix/pr9-panel-tab-persistence
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-panel-fix:
+    name: Validate panel fix and build Hop Dev
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact fix source
+        uses: actions/checkout@v4
+        with:
+          ref: 385f9eb92b46e4d4792971e981065337f3866e69
+          persist-credentials: false
+
+      - name: Verify source and toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="385f9eb92b46e4d4792971e981065337f3866e69"
+          actual="$(git rev-parse HEAD)"
+          echo "expected source: $expected"
+          echo "actual source:   $actual"
+          test "$actual" = "$expected"
+          sw_vers
+          swift --version
+
+      - name: Repository checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/checks.sh
+
+      - name: Build isolated Hop Dev app
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/build-app.sh --dev
+          test -d "dist/Hop Dev.app"
+
+      - name: Package and fingerprint
+        shell: bash
+        run: |
+          set -euo pipefail
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "dist/Hop Dev.app/Contents/Info.plist"
+          codesign -dv --verbose=2 "dist/Hop Dev.app" 2>&1 || true
+          ditto -c -k --sequesterRsrc --keepParent "dist/Hop Dev.app" "Hop-Dev-PR9-panel-fix-385f9eb.zip"
+          shasum -a 256 "Hop-Dev-PR9-panel-fix-385f9eb.zip" | tee "Hop-Dev-PR9-panel-fix-385f9eb.sha256"
+
+      - name: Upload candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: hop-dev-pr9-panel-fix-385f9eb
+          path: |
+            Hop-Dev-PR9-panel-fix-385f9eb.zip
+            Hop-Dev-PR9-panel-fix-385f9eb.sha256
+          retention-days: 7
+          if-no-files-found: error
