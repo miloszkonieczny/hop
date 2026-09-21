@@ -1,0 +1,68 @@
+name: PR9 Acceptance Artifact
+
+on:
+  push:
+    branches:
+      - validation/pr9-hop-dev-artifact
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-hop-dev:
+    name: Build exact PR9 Hop Dev artifact
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact accepted source
+        uses: actions/checkout@v7
+        with:
+          ref: 05911271f536290034108281c3400d3c7d54a94d
+          persist-credentials: false
+
+      - name: Verify source and toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="05911271f536290034108281c3400d3c7d54a94d"
+          actual="$(git rev-parse HEAD)"
+          echo "expected source: $expected"
+          echo "actual source:   $actual"
+          test "$actual" = "$expected"
+          sw_vers
+          swift --version
+
+      - name: Run repository checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/checks.sh
+
+      - name: Build isolated Hop Dev app
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/build-app.sh --dev
+          test -d "dist/Hop Dev.app"
+
+      - name: Package and fingerprint
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Bundle identifier:"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "dist/Hop Dev.app/Contents/Info.plist"
+          echo "Code signature:"
+          codesign -dv --verbose=2 "dist/Hop Dev.app" 2>&1 || true
+          ditto -c -k --sequesterRsrc --keepParent "dist/Hop Dev.app" "Hop-Dev-PR9-0591127.zip"
+          shasum -a 256 "Hop-Dev-PR9-0591127.zip" | tee "Hop-Dev-PR9-0591127.sha256"
+
+      - name: Upload acceptance artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: hop-dev-pr9-0591127
+          path: |
+            Hop-Dev-PR9-0591127.zip
+            Hop-Dev-PR9-0591127.sha256
+          retention-days: 7
+          if-no-files-found: error
