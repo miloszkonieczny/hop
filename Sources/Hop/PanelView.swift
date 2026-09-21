@@ -1265,6 +1265,7 @@ struct PanelView: View {
                 clipboard: model.clipboard,
                 recentApps: model.recentApps,
                 visibleModules: currentShellModuleKeys,
+                timerPresets: workDashboardTimerPresets,
                 quickActions: workDashboardQuickActions,
                 executeAction: { executeHopAction($0) },
                 openModule: { module in
@@ -3189,6 +3190,12 @@ struct PanelView: View {
         ]
         let byID = Dictionary(uniqueKeysWithValues: availableHopActions.map { ($0.id, $0) })
         return ids.compactMap { byID[$0] }
+    }
+
+    private var workDashboardTimerPresets: [Int] {
+        let preferred = [25, 45, 60].filter { presets.contains($0) }
+        let remainder = presets.filter { !preferred.contains($0) }
+        return Array((preferred + remainder).prefix(3))
     }
 
     private var currentShellModuleKeys: Set<String> {
