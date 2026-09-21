@@ -36,6 +36,17 @@ struct ToolsDashboardView: View {
         return favoriteIDs.compactMap { byID[$0] }
     }
 
+    private var hiddenFavoriteCount: Int {
+        max(0, favoriteIDs.count - favorites.count)
+    }
+
+    private var favoritesDetail: String {
+        if hiddenFavoriteCount > 0 {
+            return "\(hiddenFavoriteCount) hidden while module off"
+        }
+        return "Tap ★ below to edit"
+    }
+
     private var captureActions: [HopAction] {
         availableActions.filter { $0.category == .capture }
     }
@@ -117,10 +128,14 @@ struct ToolsDashboardView: View {
 
     private var favoritesSection: some View {
         VStack(alignment: .leading, spacing: 7) {
-            sectionHeader("Favorites", symbol: "star.fill", detail: "Tap ★ below to edit")
+            sectionHeader("Favorites", symbol: "star.fill", detail: favoritesDetail)
 
             if favorites.isEmpty {
-                Text("No visible favorites · star any action below")
+                Text(
+                    hiddenFavoriteCount > 0
+                        ? "Favorites are hidden because their modules are off"
+                        : "No visible favorites · star any action below"
+                )
                     .font(Theme.mono(8))
                     .foregroundStyle(Theme.textTertiary)
                     .frame(maxWidth: .infinity, minHeight: 34, alignment: .leading)
