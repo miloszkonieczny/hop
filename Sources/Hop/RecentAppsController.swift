@@ -31,9 +31,17 @@ final class RecentAppsController: ObservableObject {
         if enabled,
            let data = UserDefaults.standard.data(forKey: Self.storageKey),
            let decoded = try? JSONDecoder().decode([RecentApplication].self, from: data) {
-            applications = RecentApplications.sanitized(decoded).filter {
+            let sanitized = RecentApplications.sanitized(decoded)
+            applications = sanitized.filter {
                 FileManager.default.fileExists(atPath: $0.path)
             }
+            if applications != decoded {
+                save()
+            }
+        } else if !enabled {
+            // "Off" is a storage boundary, not merely a hidden card. Recover
+            // safely even if the preference was changed outside the dashboard.
+            UserDefaults.standard.removeObject(forKey: Self.storageKey)
         }
 
         if enabled, let current = NSWorkspace.shared.frontmostApplication {
