@@ -24,7 +24,9 @@ final class RecentAppsController: ObservableObject {
 
         if let data = UserDefaults.standard.data(forKey: Self.storageKey),
            let decoded = try? JSONDecoder().decode([RecentApplication].self, from: data) {
-            applications = RecentApplications.sanitized(decoded)
+            applications = RecentApplications.sanitized(decoded).filter {
+                FileManager.default.fileExists(atPath: $0.path)
+            }
         }
 
         if let current = NSWorkspace.shared.frontmostApplication {
@@ -43,6 +45,12 @@ final class RecentAppsController: ObservableObject {
         }
     }
 
+
+    func clear() {
+        guard !applications.isEmpty else { return }
+        applications = []
+        UserDefaults.standard.removeObject(forKey: Self.storageKey)
+    }
 
     func open(_ application: RecentApplication) {
         guard !demo, !Snapshot.active else { return }
