@@ -93,6 +93,7 @@ struct PanelView: View {
     /// that module to the top of its semantic space for this opening.
     @State private var preferredModuleID: String?
     @State private var shellQuery = ""
+    @State private var shellSelectionIndex = 0
     @FocusState private var shellSearchFocused: Bool
     // nil → the overlay back button falls through to the restored space
     @State private var scrubBaseDuration: TimeInterval?
@@ -343,7 +344,10 @@ struct PanelView: View {
         }
         .frame(width: 368)
         .background(Theme.panelBackground)
-        .onAppear { dropOrphanedShelfKeys() }
+        .onAppear {
+            dropOrphanedShelfKeys()
+            consumeCommandPaletteRequest()
+        }
         .simultaneousGesture(TapGesture().onEnded {
             // a click outside the display clears the digit-group selection (yellow highlight = focus)
             let tappedAt = Date()
@@ -366,9 +370,15 @@ struct PanelView: View {
         .onChange(of: trackerEditing) { _, _ in syncKeyboardCapture() }
         .onChange(of: todosEditing) { _, _ in syncKeyboardCapture() }
         .onChange(of: clipboardSearching) { _, _ in syncKeyboardCapture() }
-        .onChange(of: shellSearchFocused) { _, _ in syncKeyboardCapture() }
+        .onChange(of: shellSearchFocused) { _, _ in
+            syncKeyboardCapture()
+            if shellSearchFocused { shellSelectionIndex = 0 }
+        }
+        .onChange(of: shellQuery) { _, _ in shellSelectionIndex = 0 }
         .onDisappear {
             shellSearchFocused = false
+            shellQuery = ""
+            shellSelectionIndex = 0
             model.panelKeyboardCaptured = false
             // A normal left-click / hotkey reopen does not fire the openTab
             // handler (openTab stays nil), and @State survives the popover
@@ -1189,10 +1199,11 @@ struct PanelView: View {
     /// storage identity while Work / Mac / Tools controls presentation.
     private var panelContent: some View {
         VStack(spacing: 16) {
-            if shellQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                shellSpaceContent
+            if shellSearchFocused
+                || !shellQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                shellActionResults
             } else {
-                shellSearchResults
+                shellSpaceContent
             }
         }
         .padding(.horizontal, 14)
@@ -1225,55 +1236,62 @@ struct PanelView: View {
         }
     }
 
-    /// Stage-one search is intentionally navigation-only: it finds existing
-    /// modules and moves to their semantic space. PR #6 will replace this with
-    /// executable `HopAction` results. Shipping a dead search field would be
-    /// worse than shipping this small but real behavior.
-    private var shellSearchResults: some View {
-        let query = shellQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let matches = allVisiblePlacements.filter { placement in
-            let title = moduleTitle(placement.moduleID).lowercased()
-            return title.contains(query) || placement.moduleID.lowercased().contains(query)
-        }
+    /// Executable command palette. Empty focused search shows the first useful
+    /// commands; typing deterministically re-ranks the same catalog.
+    private var shellActionResults: some View {
+        let matches = currentActionMatches
         return VStack(spacing: 6) {
             if matches.isEmpty {
-                Text("No matching tools")
+                Text("No matching actions")
                     .font(Theme.mono(11))
                     .foregroundStyle(Theme.textTertiary)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 24)
             } else {
-                ForEach(matches.prefix(8)) { placement in
-                    let destination = HopSpace.containing(module: placement.moduleID)
+                ForEach(Array(matches.enumerated()), id: \.element.id) { index, action in
                     Button {
-                        selectHopSpace(
-                            destination,
-                            persist: true,
-                            preferredModule: placement.moduleID
-                        )
-                        shellQuery = ""
-                        shellSearchFocused = false
+                        executeHopAction(action)
                     } label: {
-                        HStack(spacing: 8) {
-                            Image(systemName: destination.systemImage)
-                                .font(.system(size: 11))
-                                .foregroundStyle(Theme.textTertiary)
-                                .frame(width: 18)
-                            Text(moduleTitle(placement.moduleID))
-                                .font(Theme.mono(11))
-                                .foregroundStyle(Theme.textPrimary)
-                                .lineLimit(1)
+                        HStack(spacing: 9) {
+                            Image(systemName: action.systemImage)
+                                .font(.system(size: 12))
+                                .foregroundStyle(
+                                    index == shellSelectionIndex
+                                        ? Theme.textPrimary : Theme.textSecondary
+                                )
+                                .frame(width: 20)
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(action.title)
+                                    .font(Theme.mono(11, weight: .semibold))
+                                    .foregroundStyle(Theme.textPrimary)
+                                    .lineLimit(1)
+                                Text(action.subtitle)
+                                    .font(Theme.mono(8))
+                                    .foregroundStyle(Theme.textTertiary)
+                                    .lineLimit(1)
+                            }
+
                             Spacer(minLength: 8)
-                            Text(destination.title)
-                                .font(Theme.mono(9))
-                                .foregroundStyle(Theme.textTertiary)
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 8, weight: .semibold))
+
+                            Text(action.space.title)
+                                .font(Theme.mono(8, weight: .semibold))
                                 .foregroundStyle(Theme.textTertiary)
                         }
                         .padding(.horizontal, 10)
                         .padding(.vertical, 8)
-                        .background(Theme.rowBg, in: RoundedRectangle(cornerRadius: 7))
+                        .background(
+                            index == shellSelectionIndex ? Theme.chipBg : Theme.rowBg,
+                            in: RoundedRectangle(cornerRadius: 7)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 7)
+                                .stroke(
+                                    index == shellSelectionIndex
+                                        ? Theme.textTertiary.opacity(0.35) : .clear,
+                                    lineWidth: 1
+                                )
+                        )
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -1286,10 +1304,11 @@ struct PanelView: View {
     /// A fresh ScrollView identity per semantic space/query makes every switch
     /// start at the top while the fixed chrome stays pixel-stable.
     private var scrollResetKey: String {
-        if shellQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        if !shellSearchFocused
+            && shellQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return "hop-space:\(hopSpace.rawValue)"
         }
-        return "hop-search:\(shellQuery)"
+        return "hop-actions:\(shellQuery)"
     }
 
     private var chromeHeightReader: some View {
@@ -1349,11 +1368,34 @@ struct PanelView: View {
     /// Keyboard time entry into the selected digit group: digits slide in from the
     /// right (0 → 2 gives :02). The group is picked by clicking/hovering the display.
     private func handleKey(_ press: KeyPress) -> KeyPress.Result {
+        if shellSearchFocused {
+            switch press.key {
+            case .downArrow:
+                moveCommandSelection(by: 1)
+                return .handled
+            case .upArrow:
+                moveCommandSelection(by: -1)
+                return .handled
+            case .escape:
+                if shellQuery.isEmpty {
+                    shellSearchFocused = false
+                } else {
+                    shellQuery = ""
+                    shellSelectionIndex = 0
+                }
+                return .handled
+            default:
+                // Return belongs to TextField.onSubmit; normal typing/paste must
+                // reach the field untouched.
+                return .ignored
+            }
+        }
+
         // A focused tracker/to-do field or the clipboard search field owns the
         // keyboard: Return commits the field's own text (and ⌘V pastes into it),
         // it must NOT drive the timer or the converter. Bailing here lets the key
         // fall through to the TextField's own paste / onSubmit.
-        guard !trackerEditing, !todosEditing, !clipboardSearching, !shellSearchFocused
+        guard !trackerEditing, !todosEditing, !clipboardSearching
         else { return .ignored }
 
         // Cmd+V / Cmd+Shift+V feed the clipboard into the converter, exactly
@@ -1571,12 +1613,32 @@ struct PanelView: View {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 11))
                         .foregroundStyle(Theme.textTertiary)
-                    TextField("Find tools…", text: $shellQuery)
+                    TextField("Search actions…", text: $shellQuery)
                         .textFieldStyle(.plain)
                         .font(Theme.mono(11))
                         .foregroundStyle(Theme.textPrimary)
                         .focused($shellSearchFocused)
-                        .onSubmit { openSingleShellSearchMatch() }
+                        .onSubmit { executeSelectedHopAction() }
+                        .onKeyPress { press in
+                            switch press.key {
+                            case .downArrow:
+                                moveCommandSelection(by: 1)
+                                return .handled
+                            case .upArrow:
+                                moveCommandSelection(by: -1)
+                                return .handled
+                            case .escape:
+                                if shellQuery.isEmpty {
+                                    shellSearchFocused = false
+                                } else {
+                                    shellQuery = ""
+                                    shellSelectionIndex = 0
+                                }
+                                return .handled
+                            default:
+                                return .ignored
+                            }
+                        }
                 }
                 .padding(.horizontal, 9)
                 .frame(height: 30)
@@ -3035,8 +3097,15 @@ struct PanelView: View {
         HotkeyManager.shared.refreshModuleHotkeys()
     }
 
-    private var allVisiblePlacements: [HopSpaceModulePlacement] {
-        HopSpace.allCases.flatMap { visiblePlacements(in: $0) }
+    private var availableHopActions: [HopAction] {
+        HopActionCatalog.all.filter { action in
+            guard let module = action.requiredModuleID else { return true }
+            return moduleVisible(module)
+        }
+    }
+
+    private var currentActionMatches: [HopAction] {
+        HopActionCatalog.search(shellQuery, in: availableHopActions, limit: 8)
     }
 
     private var currentShellModuleKeys: Set<String> {
@@ -3107,20 +3176,124 @@ struct PanelView: View {
         }
     }
 
-    private func openSingleShellSearchMatch() {
-        let query = shellQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !query.isEmpty else { return }
-        let matches = allVisiblePlacements.filter { placement in
-            moduleTitle(placement.moduleID).lowercased().contains(query)
-                || placement.moduleID.lowercased().contains(query)
+    private func consumeCommandPaletteRequest() {
+        guard model.commandPaletteRequested else { return }
+        model.commandPaletteRequested = false
+        shellQuery = ""
+        shellSelectionIndex = 0
+        DispatchQueue.main.async {
+            shellSearchFocused = true
         }
-        guard matches.count == 1, let match = matches.first else { return }
-        selectHopSpace(
-            HopSpace.containing(module: match.moduleID),
-            persist: true,
-            preferredModule: match.moduleID
-        )
+    }
+
+    private func moveCommandSelection(by delta: Int) {
+        let count = currentActionMatches.count
+        guard count > 0 else {
+            shellSelectionIndex = 0
+            return
+        }
+        shellSelectionIndex = (shellSelectionIndex + delta + count) % count
+    }
+
+    private func executeSelectedHopAction() {
+        let matches = currentActionMatches
+        guard !matches.isEmpty else { return }
+        let index = min(max(shellSelectionIndex, 0), matches.count - 1)
+        executeHopAction(matches[index])
+    }
+
+    private func executeHopAction(_ action: HopAction) {
+        model.activity.note()
+        shellQuery = ""
+        shellSelectionIndex = 0
         shellSearchFocused = false
+
+        switch action.execution {
+        case .screenshotToolbar:
+            closePanelThen { openNativeScreenshotToolbar() }
+
+        case .captureArea:
+            closePanelThen { model.shot.capture(.area) }
+
+        case .ocrScreen:
+            closePanelThen { model.screenText.capture() }
+
+        case .drawOnScreen:
+            closePanelThen { model.annotate.toggle() }
+
+        case .minimizeWindow:
+            closePanelThen { WindowSnapController.shared.minimizeCurrentWindow() }
+
+        case .maximizeWindow:
+            closePanelThen { WindowSnapController.shared.apply(.maximize) }
+
+        case .moveWindowLeft:
+            closePanelThen { WindowSnapController.shared.apply(.leftHalf) }
+
+        case .moveWindowRight:
+            closePanelThen { WindowSnapController.shared.apply(.rightHalf) }
+
+        case .startTimer25:
+            model.engine.setPreset(minutes: 25)
+            model.engine.start()
+            selectHopSpace(.work, persist: true, preferredModule: "timer")
+
+        case .toggleTimer:
+            model.engine.toggle()
+            selectHopSpace(.work, persist: true, preferredModule: "timer")
+
+        case .openProtonVPN:
+            closePanelThen {
+                if !model.vpn.openProtonVPN() {
+                    model.reopenPanel?(.spaceContaining("vpn"))
+                }
+            }
+
+        case .showSystemMonitor:
+            selectHopSpace(.mac, persist: true, preferredModule: "system")
+
+        case .showClipboard:
+            selectHopSpace(.work, persist: true, preferredModule: "clipboard")
+
+        case .showTodos:
+            selectHopSpace(.work, persist: true, preferredModule: "todos")
+
+        case .openConverter:
+            closePanelThen { model.openConverterWindow?() }
+
+        case .openArchive:
+            closePanelThen { model.openArchiveWindow?() }
+
+        case .openUninstaller:
+            closePanelThen { model.openUninstallWindow?() }
+        }
+    }
+
+    private func closePanelThen(_ action: @escaping () -> Void) {
+        model.closePanel?()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+            action()
+        }
+    }
+
+    private func openNativeScreenshotToolbar() {
+        let appURL = URL(fileURLWithPath: "/System/Applications/Utilities/Screenshot.app")
+        if FileManager.default.fileExists(atPath: appURL.path) {
+            let options = NSWorkspace.OpenConfiguration()
+            options.activates = true
+            NSWorkspace.shared.openApplication(
+                at: appURL,
+                configuration: options
+            ) { _, _ in }
+            return
+        }
+
+        // Fallback for a future macOS path move: LaunchServices can resolve the
+        // system app by name without shell interpolation.
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        process.arguments = ["-a", "Screenshot"]
+        try? process.run()
     }
 
     /// The three window modules, in the order the row shows them. The
