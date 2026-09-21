@@ -6,7 +6,7 @@ import SwiftUI
 /// than introducing parallel productivity state. Full modules remain one click
 /// away through the section disclosure buttons.
 struct WorkDashboardView: View {
-    @ObservedObject var engine: TimerEngine
+    let engine: TimerEngine
     @ObservedObject var todos: TodosController
     @ObservedObject var clipboard: ClipboardController
     @ObservedObject var recentApps: RecentAppsController
@@ -53,122 +53,11 @@ struct WorkDashboardView: View {
     // MARK: - Focus
 
     private var focusCard: some View {
-        dashboardCard {
-            VStack(spacing: 10) {
-                HStack {
-                    dashboardTitle("Focus", symbol: "timer")
-                    Spacer()
-                    Button {
-                        openModule("timer")
-                    } label: {
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(Theme.textTertiary)
-                            .frame(width: 22, height: 20)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .hoverHighlight(4)
-                    .help("Open full timer")
-                }
-
-                HStack(alignment: .center, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(timerText)
-                            .font(Theme.mono(28, weight: .semibold))
-                            .foregroundStyle(Theme.textPrimary)
-                            .monospacedDigit()
-
-                        Text(timerStatus)
-                            .font(Theme.mono(9))
-                            .foregroundStyle(Theme.textTertiary)
-                    }
-
-                    Spacer(minLength: 10)
-
-                    if engine.state != .idle {
-                        Button {
-                            engine.reset()
-                        } label: {
-                            Image(systemName: "arrow.counterclockwise")
-                                .font(.system(size: 10, weight: .semibold))
-                                .foregroundStyle(Theme.textSecondary)
-                                .frame(width: 28, height: 28)
-                                .background(Theme.chipBg, in: Circle())
-                        }
-                        .buttonStyle(.plain)
-                        .hoverDim()
-                        .help("Reset timer")
-                    }
-
-                    Button {
-                        engine.toggle()
-                    } label: {
-                        Image(systemName: engine.state == .running ? "pause.fill" : "play.fill")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(Theme.playFg)
-                            .frame(width: 34, height: 34)
-                            .background(Theme.playBg, in: Circle())
-                    }
-                    .buttonStyle(.plain)
-                    .hoverDim()
-                    .help(engine.state == .running ? "Pause timer" : "Start timer")
-                }
-
-                if engine.state == .idle && !engine.isStopwatch {
-                    HStack(spacing: 6) {
-                        ForEach(timerPresets.prefix(3), id: \.self) { minutes in
-                            presetChip(minutes)
-                        }
-                        Spacer()
-                    }
-                }
-            }
-        }
-    }
-
-    private func presetChip(_ minutes: Int) -> some View {
-        let active = engine.duration == TimeInterval(minutes * 60)
-        return Button {
-            engine.setPreset(minutes: minutes)
-        } label: {
-            Text("\(minutes) min")
-                .font(Theme.mono(9, weight: active ? .semibold : .medium))
-                .foregroundStyle(active ? Theme.textPrimary : Theme.textSecondary)
-                .padding(.horizontal, 7)
-                .frame(height: 23)
-                .background(active ? Theme.chipBg : Color.clear,
-                            in: RoundedRectangle(cornerRadius: 5))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 5)
-                        .stroke(Theme.divider, lineWidth: 1)
-                )
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .hoverHighlight(5)
-    }
-
-    private var timerText: String {
-        let interval = engine.isStopwatch ? engine.elapsed : engine.remaining
-        let total = max(0, Int(interval.rounded(.down)))
-        let hours = total / 3600
-        let minutes = (total % 3600) / 60
-        let seconds = total % 60
-        if hours > 0 {
-            return String(format: "%d:%02d:%02d", hours, minutes, seconds)
-        }
-        return String(format: "%02d:%02d", minutes, seconds)
-    }
-
-    private var timerStatus: String {
-        if engine.isStopwatch { return engine.state == .running ? "stopwatch running" : "stopwatch" }
-        switch engine.state {
-        case .idle: return "ready"
-        case .running: return "focus in progress"
-        case .paused: return "paused"
-        case .finished: return "finished"
-        }
+        WorkFocusCard(
+            engine: engine,
+            presets: timerPresets,
+            openFullTimer: { openModule("timer") }
+        )
     }
 
     // MARK: - To-dos
@@ -286,7 +175,7 @@ struct WorkDashboardView: View {
                                     )
                                     .frame(width: 14)
 
-                                Text(ClipboardRules.previewLine(item.text))
+                                Text(ClipPreviewCache.line(for: item))
                                     .font(Theme.mono(9))
                                     .foregroundStyle(Theme.listText)
                                     .lineLimit(1)
@@ -337,6 +226,16 @@ struct WorkDashboardView: View {
                     Text("local only")
                         .font(Theme.mono(8))
                         .foregroundStyle(Theme.textTertiary)
+                    if !recentApps.applications.isEmpty {
+                        Button("clear") {
+                            recentApps.clear()
+                        }
+                        .font(Theme.mono(8, weight: .semibold))
+                        .foregroundStyle(Theme.textTertiary)
+                        .buttonStyle(.plain)
+                        .hoverDim()
+                        .help("Clear recent apps")
+                    }
                 }
 
                 if recentApps.applications.isEmpty {
@@ -351,8 +250,8 @@ struct WorkDashboardView: View {
                                 }
                             } label: {
                                 VStack(spacing: 4) {
-                                    Image(nsImage: NSWorkspace.shared.icon(
-                                        forFile: application.path
+                                    Image(nsImage: RecentAppIconCache.icon(
+                                        for: application.path
                                     ))
                                     .resizable()
                                     .aspectRatio(contentMode: .fit)
@@ -494,5 +393,161 @@ struct WorkDashboardView: View {
             .font(Theme.mono(9))
             .foregroundStyle(Theme.textTertiary)
             .frame(maxWidth: .infinity, minHeight: 24, alignment: .leading)
+    }
+}
+
+
+/// Isolated from the rest of the Work dashboard so TimerEngine's 4 Hz heartbeat
+/// redraws only the clock card, not tasks, clipboard previews or app icons.
+private struct WorkFocusCard: View {
+    @ObservedObject var engine: TimerEngine
+    let presets: [Int]
+    let openFullTimer: () -> Void
+
+    var body: some View {
+        VStack(spacing: 10) {
+            HStack {
+                HStack(spacing: 5) {
+                    Image(systemName: "timer")
+                        .font(.system(size: 9, weight: .semibold))
+                    Text("Focus")
+                        .font(Theme.mono(9, weight: .semibold))
+                }
+                .foregroundStyle(Theme.textTertiary)
+
+                Spacer()
+
+                Button(action: openFullTimer) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(Theme.textTertiary)
+                        .frame(width: 22, height: 20)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .hoverHighlight(4)
+                .help("Open full timer")
+            }
+
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(timerText)
+                        .font(Theme.mono(28, weight: .semibold))
+                        .foregroundStyle(Theme.textPrimary)
+                        .monospacedDigit()
+
+                    Text(timerStatus)
+                        .font(Theme.mono(9))
+                        .foregroundStyle(Theme.textTertiary)
+                }
+
+                Spacer(minLength: 10)
+
+                if engine.state != .idle {
+                    Button {
+                        engine.reset()
+                    } label: {
+                        Image(systemName: "arrow.counterclockwise")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(Theme.textSecondary)
+                            .frame(width: 28, height: 28)
+                            .background(Theme.chipBg, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .hoverDim()
+                    .help("Reset timer")
+                }
+
+                Button {
+                    engine.toggle()
+                } label: {
+                    Image(systemName: engine.state == .running ? "pause.fill" : "play.fill")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Theme.playFg)
+                        .frame(width: 34, height: 34)
+                        .background(Theme.playBg, in: Circle())
+                }
+                .buttonStyle(.plain)
+                .hoverDim()
+                .help(engine.state == .running ? "Pause timer" : "Start timer")
+            }
+
+            if engine.state == .idle && !engine.isStopwatch {
+                HStack(spacing: 6) {
+                    ForEach(presets.prefix(3), id: \.self) { minutes in
+                        presetChip(minutes)
+                    }
+                    Spacer()
+                }
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity)
+        .background(Theme.rowBg, in: RoundedRectangle(cornerRadius: 9))
+        .overlay(
+            RoundedRectangle(cornerRadius: 9)
+                .stroke(Theme.divider, lineWidth: 1)
+        )
+    }
+
+    private func presetChip(_ minutes: Int) -> some View {
+        let active = engine.duration == TimeInterval(minutes * 60)
+        return Button {
+            engine.setPreset(minutes: minutes)
+        } label: {
+            Text("\(minutes) min")
+                .font(Theme.mono(9, weight: active ? .semibold : .medium))
+                .foregroundStyle(active ? Theme.textPrimary : Theme.textSecondary)
+                .padding(.horizontal, 7)
+                .frame(height: 23)
+                .background(
+                    active ? Theme.chipBg : Color.clear,
+                    in: RoundedRectangle(cornerRadius: 5)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 5)
+                        .stroke(Theme.divider, lineWidth: 1)
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .hoverHighlight(5)
+    }
+
+    private var timerText: String {
+        let interval = engine.isStopwatch ? engine.elapsed : engine.remaining
+        let total = max(0, Int(interval.rounded(.down)))
+        let hours = total / 3600
+        let minutes = (total % 3600) / 60
+        let seconds = total % 60
+        if hours > 0 {
+            return String(format: "%d:%02d:%02d", hours, minutes, seconds)
+        }
+        return String(format: "%02d:%02d", minutes, seconds)
+    }
+
+    private var timerStatus: String {
+        if engine.isStopwatch {
+            return engine.state == .running ? "stopwatch running" : "stopwatch"
+        }
+        switch engine.state {
+        case .idle: return "ready"
+        case .running: return "focus in progress"
+        case .paused: return "paused"
+        case .finished: return "finished"
+        }
+    }
+}
+
+@MainActor
+private enum RecentAppIconCache {
+    private static let cache = NSCache<NSString, NSImage>()
+
+    static func icon(for path: String) -> NSImage {
+        let key = path as NSString
+        if let cached = cache.object(forKey: key) { return cached }
+        let icon = NSWorkspace.shared.icon(forFile: path)
+        cache.setObject(icon, forKey: key)
+        return icon
     }
 }
