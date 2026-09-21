@@ -89,7 +89,10 @@ final class RecentAppsController: ObservableObject {
            let running = NSRunningApplication.runningApplications(
                withBundleIdentifier: bundleID
            ).first {
-            running.activate(options: [.activateIgnoringOtherApps])
+            // macOS 14 deprecated .activateIgnoringOtherApps and documents
+            // that it has no effect. Plain activation is the current API and
+            // preserves the intended behavior without CI warnings.
+            running.activate(options: [])
             return
         }
 
