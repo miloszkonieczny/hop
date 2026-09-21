@@ -34,14 +34,16 @@ final class MacProcessSummaryController: ObservableObject {
         inFlight = true
         let ownPID = Int32(ProcessInfo.processInfo.processIdentifier)
 
-        Task.detached(priority: .utility) { [weak self] in
+        let worker = Task.detached(priority: .utility) {
             let output = Self.readPS()
-            let parsed = ProcessUsageSummary.parsePS(output, excludingPID: ownPID)
-            await MainActor.run {
-                guard let self else { return }
-                self.summary = parsed
-                self.inFlight = false
-            }
+            return ProcessUsageSummary.parsePS(output, excludingPID: ownPID)
+        }
+
+        Task { [weak self] in
+            let parsed = await worker.value
+            guard let self else { return }
+            self.summary = parsed
+            self.inFlight = false
         }
     }
 
