@@ -11,7 +11,10 @@ struct WorkDashboardView: View {
     @ObservedObject var clipboard: ClipboardController
     @ObservedObject var recentApps: RecentAppsController
 
+    @AppStorage(SettingsKey.todoImportantOnTop) private var importantOnTop = false
+
     let visibleModules: Set<String>
+    let timerPresets: [Int]
     let quickActions: [HopAction]
     let executeAction: (HopAction) -> Void
     let openModule: (String) -> Void
@@ -20,7 +23,9 @@ struct WorkDashboardView: View {
     @State private var copiedClipboardID: UUID?
 
     private var activeTodos: [TodoItem] {
-        todos.list.displayItems.filter { !$0.done }
+        todos.list
+            .displayItems(importantFirst: importantOnTop)
+            .filter { !$0.done }
     }
 
     var body: some View {
@@ -112,9 +117,9 @@ struct WorkDashboardView: View {
 
                 if engine.state == .idle && !engine.isStopwatch {
                     HStack(spacing: 6) {
-                        presetChip(25)
-                        presetChip(45)
-                        presetChip(60)
+                        ForEach(timerPresets.prefix(3), id: \.self) { minutes in
+                            presetChip(minutes)
+                        }
                         Spacer()
                     }
                 }
@@ -172,7 +177,7 @@ struct WorkDashboardView: View {
         dashboardCard {
             VStack(spacing: 7) {
                 HStack {
-                    dashboardTitle("Today", symbol: "checklist")
+                    dashboardTitle("Tasks", symbol: "checklist")
                     Spacer()
                     Text("\(activeTodos.count) remaining")
                         .font(Theme.mono(8))
@@ -380,7 +385,7 @@ struct WorkDashboardView: View {
                 HStack {
                     dashboardTitle("Quick Actions", symbol: "bolt")
                     Spacer()
-                    Text("⌘ palette")
+                    Text("search above")
                         .font(Theme.mono(8))
                         .foregroundStyle(Theme.textTertiary)
                 }
