@@ -667,6 +667,57 @@ panel redraw path. Clipboard one-line previews reuse `ClipPreviewCache`, and app
 icons use a small in-memory cache. This is the bounded redraw cleanup in this
 stage; replacing the legacy clock propagation is a separate architectural task.
 
+#### Tools dashboard
+
+Tools' normal landing is an **action-first categorized dashboard** over the same
+typed commands and legacy modules already used elsewhere. It is not another tool
+registry.
+
+The visual order is:
+
+**Favorites → Capture → Files → Windows → Full tools**
+
+- **Favorites** contains at most six `HopAction` IDs. First use defaults to
+  Screenshot Toolbar, Capture Area, OCR, File Converter and Minimize. A star on
+  any visible action adds/removes it immediately. Favorites are persisted under
+  `SettingsKey.toolsFavoriteActions`; an explicit empty marker distinguishes
+  "the user removed everything" from "first run, use defaults".
+- Favorites are references, not copies. Their title, icon, required module and
+  execution path remain owned by `HopActionCatalog`. If a required module is
+  off, that favorite disappears from the dashboard but remains stored; re-enable
+  the module and it returns. Hidden favorites still count toward the six-item
+  limit and the dashboard says when one is hidden.
+- **Capture** uses the existing typed Screenshot Toolbar, Capture Area, OCR and
+  Draw-on-Screen actions.
+- **Files** uses the existing typed File Converter, Archive/Extract and
+  Uninstaller actions.
+- **Windows** uses the existing typed Minimize, Maximize, Left Half and Right
+  Half actions. It does not create a second window-placement engine.
+- Any future executable action whose semantic home is Tools but whose category
+  is not Capture/Files/Windows falls into a small **Other** section rather than
+  becoming unreachable.
+- **Full tools** lists every currently-visible module whose semantic home is
+  Tools, in the existing stored module order. This includes Color Picker and
+  every user-created app shelf in addition to Screenshot, OCR, Draw, Windows,
+  Converter, Archive and Uninstaller. These rows are drill-downs to the FULL
+  existing module, not shortcuts to a reduced clone.
+
+A dashboard action executes exactly the same `executeHopAction` path as command
+search. A Full-tools row temporarily replaces the dashboard with that module and
+a **Back to Tools** row. Targeted reopens such as the Color Picker returning from
+macOS's loupe land in the same full-module drilldown. Thus the redesign cannot
+make advanced module controls or app shelves unreachable.
+
+"Off is off everywhere" continues to apply twice: disabled modules are absent
+from Full tools through `HopSpaceLayout`, and actions requiring those modules
+are removed before the dashboard receives them through `availableHopActions`.
+The persisted favorite is not deleted merely because a module is temporarily
+off.
+
+The old `toolsOneRow` preference remains stored for compatibility with legacy
+layout data/snapshots; the semantic Tools dashboard does not depend on that
+presentation flag.
+
 ### Switching a module off
 
 The switch is in three places and they are one answer: the power button on the
