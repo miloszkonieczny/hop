@@ -39,8 +39,7 @@ public struct ProcessUsageSummary: Equatable, Sendable {
             // Split the first three whitespace-delimited columns and preserve the
             // remainder verbatim because executable paths can contain spaces.
             var parts: [Substring] = []
-            var start = line.startIndex
-            var cursor = start
+            var cursor = line.startIndex
 
             func skipSpaces() {
                 while cursor < line.endIndex, line[cursor].isWhitespace {
