@@ -10,6 +10,7 @@ import HopCore
 @MainActor
 final class RecentAppsController: ObservableObject {
     @Published private(set) var applications: [RecentApplication] = []
+    @Published private(set) var enabled: Bool
 
     private static let storageKey = "recentApplications"
     private var activationObserver: NSObjectProtocol?
@@ -17,19 +18,25 @@ final class RecentAppsController: ObservableObject {
 
     init(demo: Bool = false) {
         self.demo = demo
+        enabled = UserDefaults.standard.object(forKey: SettingsKey.workRecentApps) == nil
+            ? true
+            : UserDefaults.standard.bool(forKey: SettingsKey.workRecentApps)
+
         if demo || Snapshot.active {
             applications = []
+            enabled = false
             return
         }
 
-        if let data = UserDefaults.standard.data(forKey: Self.storageKey),
+        if enabled,
+           let data = UserDefaults.standard.data(forKey: Self.storageKey),
            let decoded = try? JSONDecoder().decode([RecentApplication].self, from: data) {
             applications = RecentApplications.sanitized(decoded).filter {
                 FileManager.default.fileExists(atPath: $0.path)
             }
         }
 
-        if let current = NSWorkspace.shared.frontmostApplication {
+        if enabled, let current = NSWorkspace.shared.frontmostApplication {
             record(current)
         }
 
@@ -50,6 +57,21 @@ final class RecentAppsController: ObservableObject {
         guard !applications.isEmpty else { return }
         applications = []
         UserDefaults.standard.removeObject(forKey: Self.storageKey)
+    }
+
+    func setEnabled(_ value: Bool) {
+        guard enabled != value else { return }
+        enabled = value
+        UserDefaults.standard.set(value, forKey: SettingsKey.workRecentApps)
+
+        if value {
+            if let current = NSWorkspace.shared.frontmostApplication {
+                record(current)
+            }
+        } else {
+            applications = []
+            UserDefaults.standard.removeObject(forKey: Self.storageKey)
+        }
     }
 
     func open(_ application: RecentApplication) {
@@ -85,7 +107,8 @@ final class RecentAppsController: ObservableObject {
     }
 
     private func record(_ app: NSRunningApplication) {
-        guard app.processIdentifier != ProcessInfo.processInfo.processIdentifier,
+        guard enabled,
+              app.processIdentifier != ProcessInfo.processInfo.processIdentifier,
               app.activationPolicy == .regular,
               let url = app.bundleURL,
               let name = app.localizedName,
