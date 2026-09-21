@@ -19,8 +19,12 @@ struct WorkDashboardView: View {
     let executeAction: (HopAction) -> Void
     let openModule: (String) -> Void
     let closePanel: () -> Void
+    let taskInputEditingChanged: (Bool) -> Void
 
     @State private var copiedClipboardID: UUID?
+    @State private var showQuickAdd = false
+    @State private var newTaskText = ""
+    @FocusState private var quickAddFocused: Bool
 
     private var activeTodos: [TodoItem] {
         todos.list
@@ -33,21 +37,30 @@ struct WorkDashboardView: View {
             if visibleModules.contains("timer") {
                 focusCard
             }
+            if !quickActions.isEmpty {
+                quickActionsCard
+            }
             if visibleModules.contains("todos") {
                 todosCard
             }
             if visibleModules.contains("clipboard") {
                 clipboardCard
             }
-            recentAppsCard
-            if !quickActions.isEmpty {
-                quickActionsCard
-            }
+            recentAppsRow
             if visibleModules.contains("tracker") {
                 trackerLink
             }
         }
         .frame(maxWidth: .infinity)
+        .onChange(of: quickAddFocused) { _, focused in
+            taskInputEditingChanged(focused)
+            if !focused && newTaskText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                showQuickAdd = false
+            }
+        }
+        .onDisappear {
+            taskInputEditingChanged(false)
+        }
     }
 
     // MARK: - Focus
@@ -71,6 +84,26 @@ struct WorkDashboardView: View {
                     Text("\(activeTodos.count) remaining")
                         .font(Theme.mono(8))
                         .foregroundStyle(Theme.textTertiary)
+
+                    Button {
+                        showQuickAdd.toggle()
+                        if showQuickAdd {
+                            DispatchQueue.main.async { quickAddFocused = true }
+                        } else {
+                            quickAddFocused = false
+                            newTaskText = ""
+                        }
+                    } label: {
+                        Image(systemName: showQuickAdd ? "xmark" : "plus")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(Theme.textSecondary)
+                            .frame(width: 22, height: 20)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .hoverHighlight(4)
+                    .help(showQuickAdd ? "Cancel quick add" : "Add task")
+
                     Button {
                         openModule("todos")
                     } label: {
@@ -82,6 +115,40 @@ struct WorkDashboardView: View {
                     .buttonStyle(.plain)
                     .hoverHighlight(4)
                     .help("Open all to-dos")
+                }
+
+                if showQuickAdd {
+                    HStack(spacing: 7) {
+                        Image(systemName: "plus.circle")
+                            .font(.system(size: 10))
+                            .foregroundStyle(Theme.textTertiary)
+                        TextField("Add a task…", text: $newTaskText)
+                            .textFieldStyle(.plain)
+                            .font(Theme.mono(10))
+                            .foregroundStyle(Theme.textPrimary)
+                            .focused($quickAddFocused)
+                            .onSubmit { commitQuickTask() }
+                        Button {
+                            commitQuickTask()
+                        } label: {
+                            Image(systemName: "return")
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundStyle(
+                                    newTaskText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                        ? Theme.textTertiary : Theme.textSecondary
+                                )
+                                .frame(width: 20, height: 20)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(newTaskText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                    .padding(.horizontal, 8)
+                    .frame(height: 30)
+                    .background(Theme.chipBg, in: RoundedRectangle(cornerRadius: 6))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(Theme.divider, lineWidth: 1)
+                    )
                 }
 
                 if activeTodos.isEmpty {
@@ -140,8 +207,8 @@ struct WorkDashboardView: View {
     // MARK: - Clipboard
 
     private var clipboardCard: some View {
-        dashboardCard {
-            VStack(spacing: 7) {
+        dashboardCard(padding: 8) {
+            VStack(spacing: 5) {
                 HStack {
                     dashboardTitle("Clipboard", symbol: "doc.on.clipboard")
                     Spacer()
@@ -189,7 +256,7 @@ struct WorkDashboardView: View {
                                         .foregroundStyle(Theme.accentGreen)
                                 }
                             }
-                            .frame(height: 22)
+                            .frame(height: 20)
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
@@ -217,15 +284,13 @@ struct WorkDashboardView: View {
 
     // MARK: - Recent apps
 
-    private var recentAppsCard: some View {
-        dashboardCard {
-            VStack(spacing: 8) {
-                HStack {
-                    dashboardTitle("Recent Apps", symbol: "square.grid.2x2")
-                    Spacer()
-                    Text("local only")
-                        .font(Theme.mono(8))
-                        .foregroundStyle(Theme.textTertiary)
+    private var recentAppsRow: some View {
+        VStack(spacing: 7) {
+            HStack {
+                dashboardTitle("Recent Apps", symbol: "square.grid.2x2")
+                Spacer()
+
+                if recentApps.enabled {
                     if !recentApps.applications.isEmpty {
                         Button("clear") {
                             recentApps.clear()
@@ -236,26 +301,52 @@ struct WorkDashboardView: View {
                         .hoverDim()
                         .help("Clear recent apps")
                     }
-                }
 
-                if recentApps.applications.isEmpty {
-                    emptyLine("Apps you use will appear here")
+                    Button {
+                        recentApps.setEnabled(false)
+                    } label: {
+                        Image(systemName: "eye.slash")
+                            .font(.system(size: 9))
+                            .foregroundStyle(Theme.textTertiary)
+                            .frame(width: 20, height: 18)
+                    }
+                    .buttonStyle(.plain)
+                    .hoverDim()
+                    .help("Turn off recent apps and erase the stored list")
                 } else {
-                    HStack(spacing: 8) {
-                        ForEach(recentApps.applications.prefix(5)) { application in
+                    Button("enable") {
+                        recentApps.setEnabled(true)
+                    }
+                    .font(Theme.mono(8, weight: .semibold))
+                    .foregroundStyle(Theme.textSecondary)
+                    .buttonStyle(.plain)
+                    .hoverDim()
+                    .help("Enable local recent-app tracking")
+                }
+            }
+
+            if recentApps.enabled {
+                if recentApps.applications.isEmpty {
+                    Text("Apps you use will appear here · local only")
+                        .font(Theme.mono(8))
+                        .foregroundStyle(Theme.textTertiary)
+                        .frame(maxWidth: .infinity, minHeight: 28, alignment: .leading)
+                } else {
+                    HStack(spacing: 10) {
+                        ForEach(recentApps.applications.prefix(4)) { application in
                             Button {
                                 closePanel()
                                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
                                     recentApps.open(application)
                                 }
                             } label: {
-                                VStack(spacing: 4) {
+                                VStack(spacing: 3) {
                                     Image(nsImage: RecentAppIconCache.icon(
                                         for: application.path
                                     ))
                                     .resizable()
                                     .aspectRatio(contentMode: .fit)
-                                    .frame(width: 28, height: 28)
+                                    .frame(width: 26, height: 26)
 
                                     Text(application.name)
                                         .font(Theme.mono(7))
@@ -270,67 +361,77 @@ struct WorkDashboardView: View {
                             .hoverDim()
                             .help(application.name)
                         }
+
+                        if recentApps.applications.count < 4 {
+                            Spacer(minLength: 0)
+                        }
                     }
                 }
+            } else {
+                Text("Off · no app activations are being recorded")
+                    .font(Theme.mono(8))
+                    .foregroundStyle(Theme.textTertiary)
+                    .frame(maxWidth: .infinity, minHeight: 20, alignment: .leading)
             }
         }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity)
+        .background(Theme.rowBg.opacity(0.72), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Theme.divider, lineWidth: 1)
+        )
     }
 
     // MARK: - Quick actions
 
     private var quickActionsCard: some View {
-        dashboardCard {
-            VStack(spacing: 8) {
-                HStack {
-                    dashboardTitle("Quick Actions", symbol: "bolt")
-                    Spacer()
-                    Text("search above")
-                        .font(Theme.mono(8))
-                        .foregroundStyle(Theme.textTertiary)
-                }
+        VStack(spacing: 6) {
+            HStack {
+                dashboardTitle("Quick Actions", symbol: "bolt")
+                Spacer()
+                Text("search above for more")
+                    .font(Theme.mono(7))
+                    .foregroundStyle(Theme.textTertiary)
+            }
 
-                LazyVGrid(
-                    columns: [
-                        GridItem(.flexible(), spacing: 6),
-                        GridItem(.flexible(), spacing: 6),
-                    ],
-                    spacing: 6
-                ) {
-                    ForEach(quickActions.prefix(5)) { action in
-                        Button {
-                            executeAction(action)
-                        } label: {
-                            HStack(spacing: 6) {
-                                Image(systemName: action.systemImage)
-                                    .font(.system(size: 10))
-                                    .foregroundStyle(Theme.textSecondary)
-                                    .frame(width: 16)
-                                Text(shortActionTitle(action))
-                                    .font(Theme.mono(8, weight: .semibold))
-                                    .foregroundStyle(Theme.textPrimary)
-                                    .lineLimit(1)
-                                Spacer(minLength: 2)
-                            }
-                            .padding(.horizontal, 8)
-                            .frame(height: 30)
-                            .background(Theme.chipBg, in: RoundedRectangle(cornerRadius: 6))
-                            .contentShape(Rectangle())
+            HStack(spacing: 6) {
+                ForEach(quickActions.prefix(5)) { action in
+                    Button {
+                        executeAction(action)
+                    } label: {
+                        VStack(spacing: 4) {
+                            Image(systemName: action.systemImage)
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(Theme.textSecondary)
+                                .frame(width: 24, height: 20)
+                            Text(shortActionTitle(action))
+                                .font(Theme.mono(7, weight: .semibold))
+                                .foregroundStyle(Theme.textPrimary)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.75)
                         }
-                        .buttonStyle(.plain)
-                        .hoverHighlight(6)
-                        .help(action.title)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 46)
+                        .background(Theme.chipBg, in: RoundedRectangle(cornerRadius: 7))
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
+                    .hoverHighlight(7)
+                    .help(action.title)
                 }
             }
         }
+        .padding(.horizontal, 2)
     }
 
     private func shortActionTitle(_ action: HopAction) -> String {
         switch action.id {
         case "capture.screenshotToolbar": return "Screenshot"
-        case "capture.area": return "Capture Area"
+        case "capture.area": return "Area"
         case "capture.ocr": return "OCR"
-        case "network.protonVPN": return "Proton VPN"
+        case "network.protonVPN": return "VPN"
         case "window.minimize": return "Minimize"
         default: return action.title
         }
@@ -363,13 +464,23 @@ struct WorkDashboardView: View {
         .hoverHighlight(7)
     }
 
+    private func commitQuickTask() {
+        let trimmed = newTaskText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        guard todos.add(text: trimmed) != nil else { return }
+        newTaskText = ""
+        showQuickAdd = false
+        quickAddFocused = false
+    }
+
     // MARK: - Shared pieces
 
     private func dashboardCard<Content: View>(
+        padding: CGFloat = 10,
         @ViewBuilder content: () -> Content
     ) -> some View {
         content()
-            .padding(10)
+            .padding(padding)
             .frame(maxWidth: .infinity)
             .background(Theme.rowBg, in: RoundedRectangle(cornerRadius: 9))
             .overlay(
