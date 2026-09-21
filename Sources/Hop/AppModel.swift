@@ -186,12 +186,6 @@ final class AppModel: ObservableObject {
         forwarders.append(todos.objectWillChange.sink { [weak self] in
             self?.panelModuleChanged()
         })
-        forwarders.append(clipboard.objectWillChange.sink { [weak self] in
-            self?.panelModuleChanged()
-        })
-        forwarders.append(recentApps.objectWillChange.sink { [weak self] in
-            self?.panelModuleChanged()
-        })
         forwarders.append(colorPicker.objectWillChange.sink { [weak self] in
             self?.panelModuleChanged()
         })
