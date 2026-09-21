@@ -31,6 +31,7 @@ final class AppModel: ObservableObject {
     let vpn: VPNController
     let uninstall = UninstallController()
     let appShelves: AppShelvesController
+    let recentApps: RecentAppsController
 
     /// Last time the user actively touched Hop. The updater installs a found
     /// release only after a long enough quiet gap (see UpdateInstallPolicy),
@@ -124,6 +125,7 @@ final class AppModel: ObservableObject {
         vpn = VPNController(demo: preview)
         speedTest = preview ? SpeedTestController(demo: true) : SpeedTestController()
         appShelves = AppShelvesController(demo: preview)
+        recentApps = RecentAppsController(demo: preview)
         colorPicker = ColorPickerController(clipboard: clipboard)
         screenText = ScreenTextController(clipboard: clipboard)
         holdDraw = preview ? nil : HoldDrawController(

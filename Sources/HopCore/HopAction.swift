@@ -36,6 +36,7 @@ public struct HopAction: Identifiable, Equatable, Hashable, Sendable {
         case openUninstaller
         case showClipboard
         case showTodos
+        case showTracker
     }
 
     public let id: String
@@ -264,6 +265,17 @@ public enum HopActionCatalog {
             systemImage: "checklist",
             requiredModuleID: "todos",
             execution: .showTodos
+        ),
+        HopAction(
+            id: "navigate.tracker",
+            title: "Time Tracker",
+            subtitle: "Open Hop's time tracking module",
+            keywords: ["tracker", "time tracking", "project", "study time", "work time"],
+            category: .navigate,
+            space: .work,
+            systemImage: "clock.arrow.circlepath",
+            requiredModuleID: "tracker",
+            execution: .showTracker
         ),
     ]
 

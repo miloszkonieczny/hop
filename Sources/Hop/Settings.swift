@@ -55,6 +55,9 @@ enum SettingsKey {
     static let panelTabs = "panelTabs"
     /// Last semantic shell space selected in the compact panel.
     static let hopSpace = "hopSpace"
+    /// Work-dashboard recent-app MRU. ON by default; turning it off immediately
+    /// clears the locally stored list and stops recording activations.
+    static let workRecentApps = "workRecentApps"
     /// Which onboarding step to reopen on. SPEC: docs/spec.md — "Onboarding".
     static let onboardingStep = "onboardingStep"
     static let onboardingWantsApps = "onboardingWantsApps"
@@ -131,6 +134,7 @@ enum SettingsKey {
         todoRemindSound: true,
         todoRemindMark: true,
         vpnMenuBarMark: true,
+        workRecentApps: true,
     ]
 }
 
