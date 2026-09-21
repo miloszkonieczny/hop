@@ -57,6 +57,7 @@ struct MacDashboardView: View {
 
             if visibleModules.contains("awake")
                 || visibleModules.contains("keyboard")
+                || visibleModules.contains("torrent")
                 || visibleModules.contains("system") {
                 controlsRow
             }
