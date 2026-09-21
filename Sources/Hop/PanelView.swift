@@ -1797,26 +1797,29 @@ struct PanelView: View {
     private var hopSpaceSwitcher: some View {
         HStack(spacing: 2) {
             ForEach(HopSpace.allCases, id: \.rawValue) { space in
-                Button {
-                    selectHopSpace(space, persist: true)
-                } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: space.systemImage)
-                            .font(.system(size: 11))
-                        Text(space.title)
-                            .font(Theme.mono(10, weight: .semibold))
-                    }
-                    .foregroundStyle(hopSpace == space ? Theme.textPrimary : Theme.textTertiary)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 28)
-                    .background(
-                        hopSpace == space ? Theme.chipBg : Color.clear,
-                        in: RoundedRectangle(cornerRadius: 6)
-                    )
-                    .contentShape(Rectangle())
+                HStack(spacing: 5) {
+                    Image(systemName: space.systemImage)
+                        .font(.system(size: 11))
+                    Text(space.title)
+                        .font(Theme.mono(10, weight: .semibold))
                 }
-                .buttonStyle(.plain)
+                .foregroundStyle(hopSpace == space ? Theme.textPrimary : Theme.textTertiary)
+                .frame(maxWidth: .infinity)
+                .frame(height: 28)
+                .background(
+                    hopSpace == space ? Theme.chipBg : Color.clear,
+                    in: RoundedRectangle(cornerRadius: 6)
+                )
+                .contentShape(Rectangle())
                 .hoverHighlight(6)
+                // Keep semantic-space switching as a passive panel gesture.
+                // The legacy tab switcher used the same interaction shape.
+                // A SwiftUI Button can make the transient NSPopover participate
+                // in app activation/focus handoff and close during an in-panel
+                // Work/Mac/Tools switch.
+                .onTapGesture {
+                    selectHopSpace(space, persist: true)
+                }
             }
         }
         .padding(2)
