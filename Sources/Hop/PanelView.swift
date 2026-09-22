@@ -3347,6 +3347,10 @@ struct PanelView: View {
     }
 
     private func toggleToolsFavorite(_ id: String) {
+        // Changing favorites rewrites the Tools dashboard during the same click.
+        // Treat that as an internal panel transition so the delayed focus handoff
+        // cannot make the transient popover close before the updated dashboard is shown.
+        model.panelSemanticNavigation?()
         let next = ToolsFavorites.toggling(
             id,
             in: toolsFavoriteIDs,
