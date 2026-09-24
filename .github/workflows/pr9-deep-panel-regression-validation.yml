@@ -1,0 +1,65 @@
+name: PR9 Deep Panel Regression Validation
+
+on:
+  push:
+    branches:
+      - fix/pr9-panel-tab-persistence
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact audited source
+        uses: actions/checkout@v4
+        with:
+          ref: 098b108f7a749a977647f19c8dcb1733d49d58f7
+          persist-credentials: false
+
+      - name: Verify source and toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="098b108f7a749a977647f19c8dcb1733d49d58f7"
+          actual="$(git rev-parse HEAD)"
+          echo "expected source: $expected"
+          echo "actual source:   $actual"
+          test "$actual" = "$expected"
+          sw_vers
+          swift --version
+
+      - name: Repository checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/checks.sh
+
+      - name: Build isolated Hop Dev app
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/build-app.sh --dev
+          test -d "dist/Hop Dev.app"
+
+      - name: Package and fingerprint
+        shell: bash
+        run: |
+          set -euo pipefail
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "dist/Hop Dev.app/Contents/Info.plist"
+          codesign --verify --deep --strict --verbose=2 "dist/Hop Dev.app"
+          ditto -c -k --sequesterRsrc --keepParent "dist/Hop Dev.app" "Hop-Dev-PR9-deep-fix-098b108.zip"
+          shasum -a 256 "Hop-Dev-PR9-deep-fix-098b108.zip" | tee "Hop-Dev-PR9-deep-fix-098b108.sha256"
+
+      - name: Upload candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: hop-dev-pr9-deep-fix-098b108
+          path: |
+            Hop-Dev-PR9-deep-fix-098b108.zip
+            Hop-Dev-PR9-deep-fix-098b108.sha256
+          retention-days: 7
+          if-no-files-found: error
