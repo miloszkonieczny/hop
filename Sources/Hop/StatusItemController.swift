@@ -153,7 +153,7 @@ final class StatusItemController: NSObject {
                 self?.hiddenAnchorWindow?.orderOut(nil)
                 self?.hiddenAnchorWindow = nil
                 self?.previousApp = nil
-                self?.focusReturnSuppressedUntil = .distantPast
+                self?.focusReturnSuppressedUntil = 0
                 self?.model.panelKeyboardCaptured = false
                 self?.model.setPanelVisible(false, surface: "popover")
                 self?.refreshButton()
@@ -256,17 +256,17 @@ final class StatusItemController: NSObject {
     /// A semantic-space click rebuilds a sizeable part of the SwiftUI tree.
     /// Keep activation with Hop for that one interaction so a transient
     /// NSPopover cannot interpret our normal focus handoff as an outside click.
-    private var focusReturnSuppressedUntil = Date.distantPast
+    private var focusReturnSuppressedUntil: TimeInterval = 0
 
     private var focusReturnSuppressed: Bool {
-        Date() < focusReturnSuppressedUntil
+        ProcessInfo.processInfo.systemUptime < focusReturnSuppressedUntil
     }
 
     private func suppressFocusReturnForSemanticNavigation() {
         // Covers the synchronous click callback and the delayed
         // didBecomeActive reconciliation below, without changing normal
         // outside-click behavior of the transient popover.
-        focusReturnSuppressedUntil = Date().addingTimeInterval(0.35)
+        focusReturnSuppressedUntil = ProcessInfo.processInfo.systemUptime + 0.35
     }
 
     /// Close the transient panel only when the current mouse event really
