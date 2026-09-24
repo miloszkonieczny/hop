@@ -33,6 +33,11 @@ final class StatusItemController: NSObject {
     private var statsCancellable: AnyCancellable?
     /// Runs only across a handover between two clocks sharing the bar.
     private var fadeTicker: Timer?
+    /// Identifies real clicks on Hop auxiliary windows while the transient
+    /// popover is open. This avoids inferring click origin from NSApp.keyWindow,
+    /// which can legitimately remain an older Converter/Settings window while
+    /// the user is actually clicking inside the popover.
+    private var auxiliaryWindowMouseMonitor: Any?
 
     init(model: AppModel) {
         self.model = model
@@ -70,6 +75,15 @@ final class StatusItemController: NSObject {
             }
         }
 
+        auxiliaryWindowMouseMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown]
+        ) { [weak self] event in
+            MainActor.assumeIsolated {
+                self?.handleLocalMouseDownWhilePanelOpen(event)
+            }
+            return event
+        }
+
         cancellable = model.objectWillChange
             .receive(on: RunLoop.main)
             .sink { [weak self] in self?.refreshButton() }
@@ -96,7 +110,14 @@ final class StatusItemController: NSObject {
         }
         // the updater treats an open panel as active use and won't relaunch under it
         model.isPanelOpen = { [weak self] in self?.popover.isShown ?? false }
-        model.panelFocusChanged = { [weak self] in self?.maybeReturnFocus() }
+        model.panelFocusChanged = { [weak self] in
+            // Let the control's own action finish first. Semantic navigation
+            // marks the current interaction as internal before this runs.
+            DispatchQueue.main.async { [weak self] in self?.maybeReturnFocus() }
+        }
+        model.panelSemanticNavigation = { [weak self] in
+            self?.suppressFocusReturnForSemanticNavigation()
+        }
         // belt and suspenders: click pings cover most paths, but ANY way Hop
         // becomes the active app while the panel is open (tab switches,
         // scrolls, AppKit quirks) must also hand the keyboard back — voice
@@ -109,20 +130,12 @@ final class StatusItemController: NSObject {
                 // let the click that activated us finish first: focus fields
                 // and editUnit update on the same runloop turn
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                    // The app was re-activated by clicking one of its OWN real
-                    // windows (settings/about/converter/…) — that window is now
-                    // key. The panel is a transient popover: it must not stay
-                    // glued on its elevated level above the clicked window, or
-                    // it resurfaces there on the next activation. Close it,
-                    // just as an outside click does. A genuine summon yields
-                    // activation back to the previous app first, so the key
-                    // window is nil (or the panel itself) here and the panel is
-                    // kept.
-                    let panelWindow = self.popover.contentViewController?.view.window
-                    if let key = NSApp.keyWindow, key !== panelWindow {
-                        self.popover.close()
-                        return
-                    }
+                    // Activation does not identify where the click happened.
+                    // In particular, NSApp.keyWindow can still be a previously
+                    // opened Converter/Settings window while the current click
+                    // is inside this popover. Real auxiliary-window clicks are
+                    // handled by the local mouse monitor instead.
+                    guard !self.focusReturnSuppressed else { return }
                     self.maybeReturnFocus()
                 }
             }
@@ -140,6 +153,7 @@ final class StatusItemController: NSObject {
                 self?.hiddenAnchorWindow?.orderOut(nil)
                 self?.hiddenAnchorWindow = nil
                 self?.previousApp = nil
+                self?.focusReturnSuppressedUntil = 0
                 self?.model.panelKeyboardCaptured = false
                 self?.model.setPanelVisible(false, surface: "popover")
                 self?.refreshButton()
@@ -239,11 +253,50 @@ final class StatusItemController: NSObject {
     /// keyboard-transparent, so focus keeps going back to that app.
     private var previousApp: NSRunningApplication?
 
+    /// A semantic-space click rebuilds a sizeable part of the SwiftUI tree.
+    /// Keep activation with Hop for that one interaction so a transient
+    /// NSPopover cannot interpret our normal focus handoff as an outside click.
+    private var focusReturnSuppressedUntil: TimeInterval = 0
+
+    private var focusReturnSuppressed: Bool {
+        ProcessInfo.processInfo.systemUptime < focusReturnSuppressedUntil
+    }
+
+    private func suppressFocusReturnForSemanticNavigation() {
+        // Covers the synchronous click callback and the delayed
+        // didBecomeActive reconciliation below, without changing normal
+        // outside-click behavior of the transient popover.
+        focusReturnSuppressedUntil = ProcessInfo.processInfo.systemUptime + 0.35
+    }
+
+    /// Close the transient panel only when the current mouse event really
+    /// targets another ordinary Hop window. A stale keyWindow is not evidence
+    /// of an outside click; event.window is.
+    private func handleLocalMouseDownWhilePanelOpen(_ event: NSEvent) {
+        guard popover.isShown,
+              let eventWindow = event.window,
+              let panelWindow = popover.contentViewController?.view.window
+        else { return }
+
+        if eventWindow === panelWindow || eventWindow === statusItem.button?.window { return }
+
+        // Menus, sheets and borderless helper windows are not standalone Hop
+        // destinations. Titled key-capable windows are Settings, Converter,
+        // Archive, Uninstaller, OCR, etc.; an actual click there should dismiss
+        // the transient menu-bar panel.
+        guard eventWindow.canBecomeKey,
+              eventWindow.styleMask.contains(.titled)
+        else { return }
+
+        popover.close()
+    }
+
     /// Give the keyboard back to the app under the panel — unless the panel
     /// is actually typing (digit entry, the clipboard search field) or focus
     /// has legitimately moved to another Hop window (settings, converter).
     func maybeReturnFocus() {
         guard popover.isShown else { return }
+        guard !focusReturnSuppressed else { return }
         guard !model.panelKeyboardCaptured else { return }
         let panelWindow = popover.contentViewController?.view.window
         if let key = NSApp.keyWindow, key !== panelWindow { return }
