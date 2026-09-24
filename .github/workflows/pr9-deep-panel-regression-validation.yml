@@ -17,14 +17,14 @@ jobs:
       - name: Checkout exact audited source
         uses: actions/checkout@v4
         with:
-          ref: 098b108f7a749a977647f19c8dcb1733d49d58f7
+          ref: 258ef5bda2cd2bd3c492c2d8e380527c092bad1a
           persist-credentials: false
 
       - name: Verify source and toolchain
         shell: bash
         run: |
           set -euo pipefail
-          expected="098b108f7a749a977647f19c8dcb1733d49d58f7"
+          expected="258ef5bda2cd2bd3c492c2d8e380527c092bad1a"
           actual="$(git rev-parse HEAD)"
           echo "expected source: $expected"
           echo "actual source:   $actual"
@@ -51,15 +51,15 @@ jobs:
           set -euo pipefail
           /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "dist/Hop Dev.app/Contents/Info.plist"
           codesign --verify --deep --strict --verbose=2 "dist/Hop Dev.app"
-          ditto -c -k --sequesterRsrc --keepParent "dist/Hop Dev.app" "Hop-Dev-PR9-deep-fix-098b108.zip"
-          shasum -a 256 "Hop-Dev-PR9-deep-fix-098b108.zip" | tee "Hop-Dev-PR9-deep-fix-098b108.sha256"
+          ditto -c -k --sequesterRsrc --keepParent "dist/Hop Dev.app" "Hop-Dev-PR9-deep-fix-258ef5b.zip"
+          shasum -a 256 "Hop-Dev-PR9-deep-fix-258ef5b.zip" | tee "Hop-Dev-PR9-deep-fix-258ef5b.sha256"
 
       - name: Upload candidate
         uses: actions/upload-artifact@v4
         with:
-          name: hop-dev-pr9-deep-fix-098b108
+          name: hop-dev-pr9-deep-fix-258ef5b
           path: |
-            Hop-Dev-PR9-deep-fix-098b108.zip
-            Hop-Dev-PR9-deep-fix-098b108.sha256
+            Hop-Dev-PR9-deep-fix-258ef5b.zip
+            Hop-Dev-PR9-deep-fix-258ef5b.sha256
           retention-days: 7
           if-no-files-found: error
