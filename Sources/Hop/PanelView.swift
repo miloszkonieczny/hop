@@ -706,7 +706,7 @@ struct PanelView: View {
     private func openReleaseNotes(_ card: ReleaseCard) {
         markReleaseSeen(card)
         model.settingsSectionRequest = card.destination.id
-        model.openSettingsWindow?()
+        closePanelThen { model.openSettingsWindow?() }
     }
 
     /// The checklist entry that stands for "a grid of apps". Deliberately the
@@ -1248,6 +1248,7 @@ struct PanelView: View {
            }) {
             VStack(spacing: 12) {
                 Button {
+                    model.panelSemanticNavigation?()
                     workDetailModuleID = nil
                     preferredModuleID = nil
                 } label: {
@@ -1301,6 +1302,7 @@ struct PanelView: View {
            }) {
             VStack(spacing: 12) {
                 Button {
+                    model.panelSemanticNavigation?()
                     macDetailModuleID = nil
                     preferredModuleID = nil
                 } label: {
@@ -1357,6 +1359,7 @@ struct PanelView: View {
            }) {
             VStack(spacing: 12) {
                 Button {
+                    model.panelSemanticNavigation?()
                     toolsDetailModuleID = nil
                     preferredModuleID = nil
                 } label: {
@@ -1613,7 +1616,7 @@ struct PanelView: View {
                   editUnit == nil
             else { return .ignored }
             if model.converter.addFromPasteboard() {
-                model.openConverterWindow?()
+                closePanelThen { model.openConverterWindow?() }
             }
             return .handled
         }
@@ -1837,7 +1840,7 @@ struct PanelView: View {
                 )
 
                 headerIcon("gearshape", help: t(.settingsTitle)) {
-                    model.openSettingsWindow?()
+                    closePanelThen { model.openSettingsWindow?() }
                 }
                 headerIcon("power", help: t(.menuQuit)) {
                     model.requestQuit?()
@@ -2918,7 +2921,7 @@ struct PanelView: View {
 
     private var convertZone: some View {
         Button {
-            model.openConverterWindow?()
+            closePanelThen { model.openConverterWindow?() }
         } label: {
             HStack(spacing: 6) {
                 ModuleMarkIcon(symbol: "doc.zipper",
@@ -2956,7 +2959,7 @@ struct PanelView: View {
                     }
                 }
                 model.converter.addToBatch(urls)
-                model.openConverterWindow?()
+                closePanelThen { model.openConverterWindow?() }
             }
             return true
         }
@@ -3756,7 +3759,7 @@ struct PanelView: View {
         case "ocr":
             ScreenTextView(reader: model.screenText, lang: lang,
                            closePanel: { model.closePanel?() },
-                           openWindow: { model.openScreenTextWindow?() })
+                           openWindow: { closePanelThen { model.openScreenTextWindow?() } })
                 .id(model.themeVersion)
         case "shot":
             ShotView(shot: model.shot, lang: lang,
@@ -3768,17 +3771,17 @@ struct PanelView: View {
                 .id(model.themeVersion)
         case "archive":
             ArchiveView(archive: model.archive, lang: lang,
-                        openWindow: { model.openArchiveWindow?() })
+                        openWindow: { closePanelThen { model.openArchiveWindow?() } })
                 .id(model.themeVersion)
         case "uninstall":
             UninstallView(uninstall: model.uninstall, lang: lang,
-                          openWindow: { model.openUninstallWindow?() })
+                          openWindow: { closePanelThen { model.openUninstallWindow?() } })
                 .id(model.themeVersion)
         case Self.toolsRowKey:
             ToolsRowView(lang: lang, tools: toolsInRow(spaceID)) { tool in
                 switch tool {
-                case .convert: model.openConverterWindow?()
-                case .archive: model.openArchiveWindow?()
+                case .convert: closePanelThen { model.openConverterWindow?() }
+                case .archive: closePanelThen { model.openArchiveWindow?() }
                 }
             }
             .id(model.themeVersion)
