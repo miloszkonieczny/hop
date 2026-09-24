@@ -33,6 +33,11 @@ final class StatusItemController: NSObject {
     private var statsCancellable: AnyCancellable?
     /// Runs only across a handover between two clocks sharing the bar.
     private var fadeTicker: Timer?
+    /// Identifies real clicks on Hop auxiliary windows while the transient
+    /// popover is open. This avoids inferring click origin from NSApp.keyWindow,
+    /// which can legitimately remain an older Converter/Settings window while
+    /// the user is actually clicking inside the popover.
+    private var auxiliaryWindowMouseMonitor: Any?
 
     init(model: AppModel) {
         self.model = model
@@ -68,6 +73,15 @@ final class StatusItemController: NSObject {
                 [weak self] _, _ in
                 Task { @MainActor in self?.refreshButton() }
             }
+        }
+
+        auxiliaryWindowMouseMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown]
+        ) { [weak self] event in
+            MainActor.assumeIsolated {
+                self?.handleLocalMouseDownWhilePanelOpen(event)
+            }
+            return event
         }
 
         cancellable = model.objectWillChange
@@ -116,25 +130,12 @@ final class StatusItemController: NSObject {
                 // let the click that activated us finish first: focus fields
                 // and editUnit update on the same runloop turn
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                    // Work / Mac / Tools navigation is fully inside this
-                    // popover. Returning activation during the same click can
-                    // make a transient NSPopover interpret the handoff as an
-                    // outside interaction and close itself.
+                    // Activation does not identify where the click happened.
+                    // In particular, NSApp.keyWindow can still be a previously
+                    // opened Converter/Settings window while the current click
+                    // is inside this popover. Real auxiliary-window clicks are
+                    // handled by the local mouse monitor instead.
                     guard !self.focusReturnSuppressed else { return }
-                    // The app was re-activated by clicking one of its OWN real
-                    // windows (settings/about/converter/…) — that window is now
-                    // key. The panel is a transient popover: it must not stay
-                    // glued on its elevated level above the clicked window, or
-                    // it resurfaces there on the next activation. Close it,
-                    // just as an outside click does. A genuine summon yields
-                    // activation back to the previous app first, so the key
-                    // window is nil (or the panel itself) here and the panel is
-                    // kept.
-                    let panelWindow = self.popover.contentViewController?.view.window
-                    if let key = NSApp.keyWindow, key !== panelWindow {
-                        self.popover.close()
-                        return
-                    }
                     self.maybeReturnFocus()
                 }
             }
@@ -266,6 +267,28 @@ final class StatusItemController: NSObject {
         // didBecomeActive reconciliation below, without changing normal
         // outside-click behavior of the transient popover.
         focusReturnSuppressedUntil = Date().addingTimeInterval(0.35)
+    }
+
+    /// Close the transient panel only when the current mouse event really
+    /// targets another ordinary Hop window. A stale keyWindow is not evidence
+    /// of an outside click; event.window is.
+    private func handleLocalMouseDownWhilePanelOpen(_ event: NSEvent) {
+        guard popover.isShown,
+              let eventWindow = event.window,
+              let panelWindow = popover.contentViewController?.view.window
+        else { return }
+
+        if eventWindow === panelWindow || eventWindow === statusItem.button?.window { return }
+
+        // Menus, sheets and borderless helper windows are not standalone Hop
+        // destinations. Titled key-capable windows are Settings, Converter,
+        // Archive, Uninstaller, OCR, etc.; an actual click there should dismiss
+        // the transient menu-bar panel.
+        guard eventWindow.canBecomeKey,
+              eventWindow.styleMask.contains(.titled)
+        else { return }
+
+        popover.close()
     }
 
     /// Give the keyboard back to the app under the panel — unless the panel
