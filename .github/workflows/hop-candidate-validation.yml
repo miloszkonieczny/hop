@@ -62,6 +62,13 @@ jobs:
           allowed = {
               '.github/workflows/hop-candidate-validation.yml',
               'Sources/Hop/Controls.swift',
+              'Sources/Hop/AppModel.swift',
+              'Sources/Hop/PanelView.swift',
+              'Sources/Hop/StatusItemController.swift',
+              'Sources/HopCore/TimerDigits.swift',
+              'Sources/HopCore/TimerEngine.swift',
+              'Tests/HopCoreTests/TimerDigitsTests.swift',
+              'Tests/HopCoreTests/TimerEngineTests.swift',
               'Sources/Hop/OnboardingBackdrop.swift',
               'Sources/Hop/PermissionsView.swift',
               'Sources/Hop/TimerReadout.swift',

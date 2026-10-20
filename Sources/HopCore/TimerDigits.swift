@@ -3,6 +3,14 @@ import Foundation
 /// Which digit group of the timer display a point falls in, and which characters
 /// of `HH:MM:SS` that group covers.
 public enum TimerDigits {
+    /// Entering the first key after choosing a group replaces its value;
+    /// subsequent keys shift. The clock still renders as two digits.
+    public static func enterDigit(previous: Int, digit: Int, replacing: Bool) -> Int {
+        guard (0...9).contains(digit) else { return previous }
+        if replacing { return digit }
+        return (((previous % 100) * 10) + digit) % 100
+    }
+
     public static let hours: TimeInterval = 3600
     public static let minutes: TimeInterval = 60
     public static let seconds: TimeInterval = 1

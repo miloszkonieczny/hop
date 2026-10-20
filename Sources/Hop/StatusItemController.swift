@@ -33,6 +33,11 @@ final class StatusItemController: NSObject {
     private var statsCancellable: AnyCancellable?
     /// Runs only across a handover between two clocks sharing the bar.
     private var fadeTicker: Timer?
+    /// Only the current internal tab-switch interaction suppresses focus return.
+    private var navigationSuppressUntil: TimeInterval = 0
+    private var isInternalNavigationInProgress: Bool {
+        ProcessInfo.processInfo.systemUptime < navigationSuppressUntil
+    }
 
     init(model: AppModel) {
         self.model = model
@@ -97,6 +102,9 @@ final class StatusItemController: NSObject {
         // the updater treats an open panel as active use and won't relaunch under it
         model.isPanelOpen = { [weak self] in self?.popover.isShown ?? false }
         model.panelFocusChanged = { [weak self] in self?.maybeReturnFocus() }
+        model.panelInternalNavigation = { [weak self] in
+            self?.navigationSuppressUntil = ProcessInfo.processInfo.systemUptime + 0.4
+        }
         // belt and suspenders: click pings cover most paths, but ANY way Hop
         // becomes the active app while the panel is open (tab switches,
         // scrolls, AppKit quirks) must also hand the keyboard back — voice
@@ -109,6 +117,7 @@ final class StatusItemController: NSObject {
                 // let the click that activated us finish first: focus fields
                 // and editUnit update on the same runloop turn
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    guard !self.isInternalNavigationInProgress else { return }
                     // The app was re-activated by clicking one of its OWN real
                     // windows (settings/about/converter/…) — that window is now
                     // key. The panel is a transient popover: it must not stay
@@ -140,6 +149,7 @@ final class StatusItemController: NSObject {
                 self?.hiddenAnchorWindow?.orderOut(nil)
                 self?.hiddenAnchorWindow = nil
                 self?.previousApp = nil
+                self?.navigationSuppressUntil = 0
                 self?.model.panelKeyboardCaptured = false
                 self?.model.setPanelVisible(false, surface: "popover")
                 self?.refreshButton()
@@ -244,6 +254,7 @@ final class StatusItemController: NSObject {
     /// has legitimately moved to another Hop window (settings, converter).
     func maybeReturnFocus() {
         guard popover.isShown else { return }
+        guard !isInternalNavigationInProgress else { return }
         guard !model.panelKeyboardCaptured else { return }
         let panelWindow = popover.contentViewController?.view.window
         if let key = NSApp.keyWindow, key !== panelWindow { return }

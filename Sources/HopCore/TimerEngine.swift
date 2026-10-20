@@ -325,6 +325,15 @@ public final class TimerEngine: ObservableObject {
         heartbeat = now()
     }
 
+    /// Clearing the configured duration is distinct from Reset, which keeps it.
+    /// Fail closed while the clock is running or paused.
+    public func clearDuration() {
+        guard !isStopwatch, state == .idle || state == .finished else { return }
+        reset()
+        stash = nil
+        duration = 0
+    }
+
     /// Called by the ticker; invoked manually in tests.
     public func tick() {
         let moment = now()

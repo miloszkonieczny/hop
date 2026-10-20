@@ -40,4 +40,16 @@ final class TimerDigitsTests: XCTestCase {
         XCTAssertEqual(TimerDigits.range(for: TimerDigits.minutes), 3..<5)
         XCTAssertEqual(TimerDigits.range(for: TimerDigits.seconds), 6..<8)
     }
+
+    func testFirstKeyReplacesAPreviouslySelectedDuration() {
+        XCTAssertEqual(TimerDigits.enterDigit(previous: 25, digit: 2, replacing: true), 2)
+        XCTAssertEqual(TimerDigits.enterDigit(previous: 2, digit: 3, replacing: false), 23)
+        XCTAssertEqual(TimerDigits.enterDigit(previous: 59, digit: 0, replacing: true), 0)
+    }
+
+    func testLaterDigitsShiftWithoutIntegerOverflow() {
+        XCTAssertEqual(TimerDigits.enterDigit(previous: 99, digit: 1, replacing: false), 91)
+        XCTAssertEqual(TimerDigits.enterDigit(previous: Int.max, digit: 1, replacing: false), 71)
+        XCTAssertEqual(TimerDigits.enterDigit(previous: 7, digit: 12, replacing: false), 7)
+    }
 }

@@ -234,6 +234,32 @@ final class TimerEngineTests: XCTestCase {
         XCTAssertEqual(engine.remaining, 900)
     }
 
+    func testClearDurationDoesNotChangeResetSemantics() {
+        engine.setPreset(minutes: 25)
+        engine.reset()
+        XCTAssertEqual(engine.duration, 1500)
+        engine.clearDuration()
+        XCTAssertEqual(engine.state, .idle)
+        XCTAssertEqual(engine.duration, 0)
+        XCTAssertEqual(engine.remaining, 0)
+    }
+
+    func testClearDurationRefusesToCancelRunningClock() {
+        engine.start()
+        engine.clearDuration()
+        XCTAssertEqual(engine.state, .running)
+        XCTAssertEqual(engine.duration, 600)
+    }
+
+    func testClearDurationFromFinishedReturnsToIdleAtZero() {
+        engine.start()
+        advance(700)
+        engine.tick()
+        engine.clearDuration()
+        XCTAssertEqual(engine.state, .idle)
+        XCTAssertEqual(engine.remaining, 0)
+    }
+
     // MARK: - Finish acknowledgment (blink calm-down on panel open)
 
     func testFreshFinishIsBlinkingUnacknowledged() {
