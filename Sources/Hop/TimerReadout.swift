@@ -40,7 +40,7 @@ struct TimerReadout: View {
     }
 
     private func unitsString(_ value: TimeInterval) -> String {
-        let total = max(0, Int(value.rounded(.up)))
+        let total = TimeFormatting.wholeSeconds(value)
         let hours = total / 3600
         var parts: [String] = []
         if hours > 0 { parts.append("\(hours)\(L10n.t(.unitHour, lang))") }

@@ -1,0 +1,143 @@
+# Candidate-only macOS ARM64 validation. Does not publish or install anything.
+# New workflow requires an approved push to the exact validation branch.
+name: Hop Candidate — macOS ARM64 Verification
+
+on:
+  push:
+    branches:
+      - hop-validation/2026-10-20-defensive-fixes
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hop-candidate-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate-and-package:
+    name: Verify, build, and fingerprint isolated Hop Dev
+    runs-on: macos-15
+    timeout-minutes: 75
+    permissions:
+      contents: read
+    env:
+      BASELINE_COMMIT: af6c53a2d48ad87422ef606b8a77b13960eb6cd3
+      CANDIDATE_BRANCH: hop-validation/2026-10-20-defensive-fixes
+    steps:
+      - name: Checkout exact triggering commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify source identity, branch, change scope and environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          {
+            echo "repository=$GITHUB_REPOSITORY"
+            echo "ref=$GITHUB_REF"
+            echo "trigger_sha=$GITHUB_SHA"
+            echo "actual_sha=$(git rev-parse HEAD)"
+            echo "run_id=$GITHUB_RUN_ID"
+            echo "run_attempt=$GITHUB_RUN_ATTEMPT"
+            echo "runner_arch=$(uname -m)"
+            sw_vers
+            xcodebuild -version
+            swift --version
+          } | tee evidence/environment.log
+          test "$GITHUB_REPOSITORY" = 'miloszkonieczny/hop'
+          test "$GITHUB_REF" = "refs/heads/$CANDIDATE_BRANCH"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(uname -m)" = arm64
+          git cat-file -e "$BASELINE_COMMIT^{commit}"
+          git merge-base --is-ancestor "$BASELINE_COMMIT" HEAD
+          git diff --check "$BASELINE_COMMIT" HEAD
+          git diff --name-only "$BASELINE_COMMIT" HEAD | tee evidence/change-scope.txt
+          python3 - <<'PY'
+          from pathlib import Path
+          allowed = {
+              '.github/workflows/hop-candidate-validation.yml',
+              'Sources/Hop/Controls.swift',
+              'Sources/Hop/TimerReadout.swift',
+              'Sources/HopCore/DurationField.swift',
+              'Sources/HopCore/RateLimit.swift',
+              'Sources/HopCore/TimeFormatting.swift',
+              'Tests/HopCoreTests/DefensiveFormattingTests.swift',
+          }
+          modified = set(Path('evidence/change-scope.txt').read_text().splitlines())
+          assert modified == allowed, f'Unexpected or missing source paths: {sorted(modified ^ allowed)}'
+          PY
+          test -z "$(git status --porcelain --untracked-files=no)"
+
+      - name: Full mandatory repository check suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/checks.sh > evidence/checks.log 2>&1 || {
+            tail -n 100 evidence/checks.log
+            exit 1
+          }
+          tail -n 30 evidence/checks.log
+          grep -Fq 'all checks passed' evidence/checks.log
+
+      - name: Package isolated development app (no installation)
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/build-app.sh --dev > evidence/package-build.log 2>&1 || {
+            tail -n 100 evidence/package-build.log
+            exit 1
+          }
+          APP='dist/Hop Dev.app'
+          BIN="$APP/Contents/MacOS/Hop"
+          test -d "$APP" && test -f "$BIN"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist" | tee evidence/bundle-identifier.txt
+          test "$(cat evidence/bundle-identifier.txt)" = 'com.antonshakirov.minimo.dev'
+          test "$(lipo -archs "$BIN")" = arm64
+          codesign --verify --strict --verbose=2 "$APP" > evidence/codesign-verify.log 2>&1
+          codesign -dv --verbose=4 "$APP" > evidence/signature-details.log 2>&1
+          {
+            echo "arch=$(lipo -archs "$BIN")"
+            echo "bundle_identifier=$(cat evidence/bundle-identifier.txt)"
+            echo "exe_sha256=$(shasum -a 256 "$BIN" | awk '{print $1}')"
+            echo 'signing_status=ad-hoc-or-runner-identity; inspect signature-details.log'
+            echo 'production_signed=false; notarization_not_claimed=true'
+          } | tee evidence/app-identity.txt
+          ZIP="Hop-Dev-${GITHUB_SHA:0:12}.zip"
+          ditto -c -k --sequesterRsrc --keepParent "$APP" "$ZIP"
+          shasum -a 256 "$ZIP" | tee evidence/ARTIFACT_SHA256.txt
+          python3 - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          evidence = Path('evidence')
+          zip_path = next(Path('.').glob('Hop-Dev-*.zip'))
+          paths = sorted(evidence.glob('*.log')) + sorted(evidence.glob('*.txt')) + [zip_path]
+          manifest = {
+              'schema_version': '1.1',
+              'verdict': 'CI_ARTIFACT_ONLY_NOT_INDEPENDENTLY_ACCEPTED',
+              'repository': os.environ['GITHUB_REPOSITORY'],
+              'source_commit': os.environ['GITHUB_SHA'],
+              'baseline_commit': os.environ['BASELINE_COMMIT'],
+              'run_id': os.environ['GITHUB_RUN_ID'],
+              'run_attempt': os.environ['GITHUB_RUN_ATTEMPT'],
+              'files': [{'path': str(p), 'bytes': p.stat().st_size,
+                         'sha256': hashlib.sha256(p.read_bytes()).hexdigest()} for p in paths],
+          }
+          (evidence / 'evidence-manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
+          PY
+          shasum -a 256 evidence/* "$ZIP" > evidence/SHA256SUMS
+
+      - name: Preserve evidence even when validation fails
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: hop-validation-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            evidence/
+            Hop-Dev-*.zip
+          if-no-files-found: warn
+          retention-days: 14

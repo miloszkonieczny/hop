@@ -11,7 +11,10 @@ public enum DurationField {
     /// The full form, always three parts. Hours are not padded and are not
     /// capped — a task can hold hundreds of them.
     public static func text(for seconds: TimeInterval) -> String {
-        let total = max(0, Int(seconds.rounded()))
+        // Casting NaN, infinity or a rounded value above Int.max traps in Swift.
+        guard seconds.isFinite, seconds > 0 else { return "0:00:00" }
+        let rounded = seconds.rounded()
+        let total = rounded >= Double(Int.max) ? Int.max : Int(rounded)
         return String(format: "%d:%02d:%02d", total / 3600, (total % 3600) / 60, total % 60)
     }
 
@@ -35,11 +38,12 @@ public enum DurationField {
             // worth of typing, not a refusal
             let value = part.isEmpty ? 0 : Int(part)
             guard let value, value >= 0 else { return nil }
-            switch index {
-            case 0: seconds += value
-            case 1: seconds += value * 60
-            default: seconds += value * 3600
-            }
+            let multiplier = index == 0 ? 1 : (index == 1 ? 60 : 3600)
+            let (component, multiplyOverflow) = value.multipliedReportingOverflow(by: multiplier)
+            guard !multiplyOverflow else { return nil }
+            let (total, addOverflow) = seconds.addingReportingOverflow(component)
+            guard !addOverflow else { return nil }
+            seconds = total
         }
         return TimeInterval(seconds)
     }

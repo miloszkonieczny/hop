@@ -1,9 +1,17 @@
 import Foundation
 
 public enum TimeFormatting {
+    /// Never trap on malformed or out-of-range timer values.
+    /// Shared with TimerReadout unit rendering so all clock styles are safe.
+    public static func wholeSeconds(_ remaining: TimeInterval) -> Int {
+        guard remaining.isFinite, remaining > 0 else { return 0 }
+        let rounded = remaining.rounded(.up)
+        return rounded >= Double(Int.max) ? Int.max : Int(rounded)
+    }
+
     /// Full display format: always HH:MM:SS; insignificant digits are dimmed separately.
     public static func display(_ remaining: TimeInterval) -> String {
-        let total = max(0, Int(remaining.rounded(.up)))
+        let total = wholeSeconds(remaining)
         let h = total / 3600
         let m = (total % 3600) / 60
         let s = total % 60
@@ -21,7 +29,7 @@ public enum TimeFormatting {
 
     /// Short format for the menu bar: MM:SS, or H:MM:SS when hours are present.
     public static func short(_ remaining: TimeInterval) -> String {
-        let total = max(0, Int(remaining.rounded(.up)))
+        let total = wholeSeconds(remaining)
         let h = total / 3600
         let m = (total % 3600) / 60
         let s = total % 60
