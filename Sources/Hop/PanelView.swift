@@ -358,6 +358,7 @@ struct PanelView: View {
         .onChange(of: todosEditing) { _, _ in syncKeyboardCapture() }
         .onChange(of: clipboardSearching) { _, _ in syncKeyboardCapture() }
         .onDisappear {
+            clearTimerEditOnExit()
             model.panelKeyboardCaptured = false
             // A normal left-click / hotkey reopen does not fire the openTab
             // handler (openTab stays nil), and @State survives the popover
@@ -367,6 +368,7 @@ struct PanelView: View {
         }
         .onReceive(model.$openTab) { target in
             guard let target else { return }
+            clearTimerEditOnExit()
             iconPickerTabID = nil
             let resolved = Self.resolve(target)
             screen = resolved
@@ -1578,10 +1580,20 @@ struct PanelView: View {
         if confirmDeleteTab == id { confirmDeleteTab = nil }
     }
 
+    /// Prevent a stale timer digit selection or delayed focus-release task
+    /// from keeping the keyboard captured after a tab switch or panel close.
+    private func clearTimerEditOnExit() {
+        digitFocusRelease?.cancel()
+        digitFocusRelease = nil
+        editUnit = nil
+        pointerOnDigits = false
+        replaceNextTimerDigit = true
+    }
+
     private func switchToSpace(_ id: UUID) {
-        // Switching inside the panel must not hand activation to another app;
-        // a transient NSPopover can treat that handoff as an outside click.
+        // Mark the internal interaction BEFORE altering SwiftUI content.
         model.panelInternalNavigation?()
+        clearTimerEditOnExit()
         screen = .space(id)
         activeSpaceRaw = id.uuidString
     }

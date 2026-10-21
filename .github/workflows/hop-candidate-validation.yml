@@ -67,6 +67,8 @@ jobs:
               'Sources/Hop/StatusItemController.swift',
               'Sources/HopCore/TimerDigits.swift',
               'Sources/HopCore/TimerEngine.swift',
+              'Sources/HopCore/PopoverClickPolicy.swift',
+              'Tests/HopCoreTests/PopoverClickPolicyTests.swift',
               'Tests/HopCoreTests/TimerDigitsTests.swift',
               'Tests/HopCoreTests/TimerEngineTests.swift',
               'Sources/Hop/OnboardingBackdrop.swift',
