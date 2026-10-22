@@ -36,6 +36,9 @@ final class StatusItemController: NSObject {
     /// Local AppKit mouse events identify real clicks on other Hop windows;
     /// a stale keyWindow cannot identify where the current click occurred.
     private var auxiliaryWindowMouseMonitor: Any?
+    /// Only active while the development panel is visible. Watches mouse-downs
+    /// delivered to other applications; never observes keys or their contents.
+    private var externalMouseMonitor: Any?
     /// Popover close provenance for the development build only.
     private var lastExplicitCloseReason: String?
     /// Only the current internal tab-switch interaction suppresses focus return.
@@ -49,7 +52,11 @@ final class StatusItemController: NSObject {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
 
-        popover.behavior = .transient
+        // Tab navigation replaces SwiftUI content under the pointer. AppKit's
+        // transient auto-dismissal can misclassify that as an outside click.
+        // Own dismissal instead; event monitors below preserve expected UX.
+        popover.behavior = .applicationDefined
+        recordPopoverEvent("controller-created mode=applicationDefined")
         popover.animates = false
         // top alignment: with the height rounded up, the sub-point leftover
         // goes to the bottom edge instead of re-centering the content
@@ -122,6 +129,7 @@ final class StatusItemController: NSObject {
         }
         model.panelInternalNavigation = { [weak self] in
             self?.navigationSuppressUntil = ProcessInfo.processInfo.systemUptime + 0.4
+            self?.recordPopoverEvent("internal-navigation")
         }
         // belt and suspenders: click pings cover most paths, but ANY way Hop
         // becomes the active app while the panel is open (tab switches,
@@ -152,13 +160,13 @@ final class StatusItemController: NSObject {
         ) { [weak self] note in
             Task { @MainActor in
                 if let self {
-                    if Bundle.isDevBuild {
-                        let systemReason = String(describing:
-                            note.userInfo?[NSPopover.closeReasonUserInfoKey] ?? "unavailable")
-                        NSLog("HOP-UAT popover-will-close explicit=%@ system=%@ recent-navigation=%@",
-                              self.lastExplicitCloseReason ?? "none", systemReason,
-                              self.isInternalNavigationInProgress ? "yes" : "no")
-                    }
+                    let systemReason = String(describing:
+                        note.userInfo?[NSPopover.closeReasonUserInfoKey] ?? "unavailable")
+                    self.recordPopoverEvent(
+                        "will-close explicit=\(self.lastExplicitCloseReason ?? "none") "
+                        + "system=\(systemReason) navigation=\(self.isInternalNavigationInProgress)"
+                    )
+                    self.disarmExternalMouseMonitor()
                     self.lastExplicitCloseReason = nil
                 }
                 // closing the panel starts the idle countdown for the updater
@@ -270,7 +278,7 @@ final class StatusItemController: NSObject {
     private var previousApp: NSRunningApplication?
 
     /// Close only on an actual mouse event in another key-capable titled Hop
-    /// window. The transient popover itself still owns clicks into other apps.
+    /// window. The global monitor separately handles other applications.
     private func handleLocalMouseDownWhilePanelOpen(_ event: NSEvent) {
         guard popover.isShown,
               let eventWindow = event.window,
@@ -289,7 +297,52 @@ final class StatusItemController: NSObject {
     private func closePopover(reason: String) {
         guard popover.isShown else { return }
         lastExplicitCloseReason = reason
+        recordPopoverEvent("close-request reason=\(reason)")
+        disarmExternalMouseMonitor()
         popover.close()
+    }
+
+    /// Watch only mouse down events sent to other apps. A system-wide keyboard
+    /// monitor would be intrusive and is deliberately not installed. These
+    /// events cannot originate in Hop's own tab strip (AppKit contract).
+    private func armExternalMouseMonitor() {
+        guard externalMouseMonitor == nil else { return }
+        externalMouseMonitor = NSEvent.addGlobalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown]
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, self.popover.isShown else { return }
+                self.closePopover(reason: "external-app-mouse-down")
+            }
+        }
+        recordPopoverEvent(
+            externalMouseMonitor == nil ? "external-monitor-unavailable" : "external-monitor-armed"
+        )
+    }
+
+    private func disarmExternalMouseMonitor() {
+        guard let monitor = externalMouseMonitor else { return }
+        NSEvent.removeMonitor(monitor)
+        externalMouseMonitor = nil
+    }
+
+    /// Development-only, disk-backed diagnostics: unified logging can omit
+    /// NSLog entries depending on level or the queried time window. No user
+    /// input values, document content, or cursor coordinates are recorded.
+    private func recordPopoverEvent(_ event: String) {
+        guard Bundle.isDevBuild else { return }
+        NSLog("HOP-UAT %@", event)
+        let file = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Logs/Hop-Dev-popover.log")
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+        guard let data = "\(timestamp) \(event)\n".data(using: .utf8) else { return }
+        if let handle = FileHandle(forWritingAtPath: file.path) {
+            defer { handle.closeFile() }
+            handle.seekToEndOfFile()
+            handle.write(data)
+        } else {
+            try? data.write(to: file, options: .atomic)
+        }
     }
 
     /// Give the keyboard back to the app under the panel — unless the panel
@@ -427,6 +480,7 @@ final class StatusItemController: NSObject {
     private func presentPopover() {
         guard !popover.isShown, let button = statusItem.button else { return }
         model.setPanelVisible(true, surface: "popover") // before the size is measured
+        recordPopoverEvent("open-request")
         model.activity.note() // opening the panel is active use
         // opening the panel acknowledges a finished timer: the bar bell and the
         // digits stop blinking and settle steady (the state stays finished).
@@ -452,6 +506,10 @@ final class StatusItemController: NSObject {
         }
         if let panelWindow = popover.contentViewController?.view.window {
             debugLogPanelFrame("shown", frame: panelWindow.frame)
+        }
+        if popover.isShown {
+            armExternalMouseMonitor()
+            recordPopoverEvent("shown")
         }
         // return focus to the previous app: the panel stays visible
         // (transient doesn't close on programmatic activation), and the keyboard
