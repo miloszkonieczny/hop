@@ -75,6 +75,8 @@ final class AppModel: ObservableObject {
     /// Ping after panel clicks / edit-state changes: the status item controller
     /// decides whether to hand focus back to the app under the panel.
     var panelFocusChanged: (() -> Void)?
+    /// Marks internal tab navigation so focus handoff cannot dismiss the popover.
+    var panelInternalNavigation: (() -> Void)?
     /// Open the standalone settings window.
     var openSettingsWindow: (() -> Void)?
     /// Open the standalone converter window.

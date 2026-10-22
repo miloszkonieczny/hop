@@ -15,23 +15,57 @@ public enum RateLimit {
     /// Upper bound on the canonical KB/s value: MB mode allows up to 9999.9 MB.
     public static let maxKB = 9_999_900
 
+    /// Filter a torrent rate while editing. The filter must preserve every
+    /// canonical KB/s limit through the UI, not only the core parser/display.
+    /// MB mode allows 4 digits before and 3 digits after the decimal point;
+    /// KB mode allows 7 digits (maxKB itself has 7 digits).
+    public static func filterInput(_ raw: String, unit: RateUnit) -> String {
+        switch unit {
+        case .kb:
+            return String(raw.filter(\.isNumber).prefix(7))
+        case .mb:
+            var seenDot = false, intDigits = 0, fracDigits = 0
+            var out = ""
+            for ch in raw {
+                if ch.isNumber {
+                    if seenDot {
+                        guard fracDigits < 3 else { continue }
+                        fracDigits += 1
+                    } else {
+                        guard intDigits < 4 else { continue }
+                        intDigits += 1
+                    }
+                    out.append(ch)
+                } else if ch == ".", !seenDot {
+                    seenDot = true
+                    out.append(ch)
+                }
+            }
+            return out
+        }
+    }
+
     /// Clamp a canonical KB/s value into the valid range (0…maxKB).
     public static func clampKB(_ kb: Int) -> Int {
         max(0, min(kb, maxKB))
     }
 
     /// Render a canonical KB/s value in the given unit. KB mode is the integer;
-    /// MB mode is one decimal with trailing zeros (and a bare ".0") trimmed —
-    /// 2000 → "2", 1500 → "1.5", 500 → "0.5". 0 stays "0" (unlimited) in both.
+    /// MB mode preserves all three KB-derived decimal places, trimming trailing
+    /// zeros — otherwise 1…49 KB/s would look like "0" (unlimited), and editing
+    /// the shown value would silently change the limit.
     public static func display(kb: Int, unit: RateUnit) -> String {
         switch unit {
         case .kb:
             return "\(clampKB(kb))"
         case .mb:
-            let mb = Double(clampKB(kb)) / Double(kbPerMB)
-            var s = String(format: "%.1f", mb)
-            if s.hasSuffix(".0") { s = String(s.dropLast(2)) }
-            return s
+            let amount = clampKB(kb)
+            let whole = amount / kbPerMB
+            let remainder = amount % kbPerMB
+            guard remainder != 0 else { return "\(whole)" }
+            var fractional = String(format: "%03d", remainder)
+            while fractional.last == "0" { fractional.removeLast() }
+            return "\(whole).\(fractional)"
         }
     }
 
@@ -50,6 +84,10 @@ public enum RateLimit {
             let dots = trimmed.filter { $0 == "." }.count
             guard dots <= 1, trimmed.allSatisfy({ $0.isNumber || $0 == "." }),
                   let mb = Double(trimmed), mb >= 0 else { return nil }
+            // Clamp before converting to Int: large pasted numbers (including
+            // Double.infinity) otherwise trigger a runtime conversion trap.
+            let capMB = Double(maxKB) / Double(kbPerMB)
+            if mb >= capMB { return maxKB }
             return clampKB(Int((mb * Double(kbPerMB)).rounded()))
         }
     }

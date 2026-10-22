@@ -86,8 +86,8 @@ struct VisibleRowsField: View {
 }
 
 /// Torrent speed-limit entry: a free-form field bound to a CANONICAL KB/s value,
-/// shown and entered in the chosen unit (KB/s or MB/s). KB mode accepts up to 6
-/// digits; MB mode accepts up to 4 integer digits plus one optional decimal
+/// shown and entered in the chosen unit (KB/s or MB/s). KB mode accepts up to 7
+/// digits; MB mode accepts up to 4 integer digits plus three optional decimal places
 /// (e.g. 12.5). Empty / 0 = unlimited (kept). Toggling the unit reformats the
 /// displayed value in place; the stored KB/s never changes. Conversion, parsing
 /// and clamping live in `HopCore.RateLimit` (tested). A ZERO value (= no limit,
@@ -131,32 +131,10 @@ struct RateLimitField: View {
             }
     }
 
-    /// Keep only the characters valid for the unit and cap the digit count:
-    /// KB — up to 6 digits; MB — up to 4 integer digits + one dot + one decimal.
+    /// Keep filtering in HopCore alongside canonical rate parsing; a tiny
+    /// nonzero limit must survive the UI's editing filter unchanged.
     private static func filter(_ raw: String, unit: RateUnit) -> String {
-        switch unit {
-        case .kb:
-            return String(raw.filter(\.isNumber).prefix(6))
-        case .mb:
-            var seenDot = false, intDigits = 0, fracDigits = 0
-            var out = ""
-            for ch in raw {
-                if ch.isNumber {
-                    if seenDot {
-                        guard fracDigits < 1 else { continue }
-                        fracDigits += 1
-                    } else {
-                        guard intDigits < 4 else { continue }
-                        intDigits += 1
-                    }
-                    out.append(ch)
-                } else if ch == ".", !seenDot {
-                    seenDot = true
-                    out.append(ch)
-                }
-            }
-            return out
-        }
+        RateLimit.filterInput(raw, unit: unit)
     }
 }
 

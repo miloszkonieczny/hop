@@ -93,6 +93,7 @@ struct PanelView: View {
     // snapshot, so the release-notes design can be reviewed as a picture.
     @State private var settingsSection = Snapshot.settingsSectionForRender
     @State private var editUnit: TimeInterval? // digit group being edited (3600/60/1)
+    @State private var replaceNextTimerDigit = true // first key replaces selected two-digit group
     @State private var pointerOnDigits = false
     @State private var digitFocusRelease: DispatchWorkItem?
     // A tracker inline field (project/task name or "today" time) is focused.
@@ -309,7 +310,8 @@ struct PanelView: View {
     /// and, if it is taller than the screen, enable a shared fixed-height scroll —
     /// protection against any future module growth, not per-module caps.
     private var maxPanelHeight: CGFloat {
-        ((NSScreen.main?.visibleFrame.height) ?? 800) - 24
+        let screenHeight = (NSScreen.main?.visibleFrame.height) ?? 800
+        return max(0, min(screenHeight - 24, screenHeight * 0.82))
     }
 
     private var panelBody: some View {
@@ -356,6 +358,7 @@ struct PanelView: View {
         .onChange(of: todosEditing) { _, _ in syncKeyboardCapture() }
         .onChange(of: clipboardSearching) { _, _ in syncKeyboardCapture() }
         .onDisappear {
+            clearTimerEditOnExit()
             model.panelKeyboardCaptured = false
             // A normal left-click / hotkey reopen does not fire the openTab
             // handler (openTab stays nil), and @State survives the popover
@@ -365,6 +368,7 @@ struct PanelView: View {
         }
         .onReceive(model.$openTab) { target in
             guard let target else { return }
+            clearTimerEditOnExit()
             iconPickerTabID = nil
             let resolved = Self.resolve(target)
             screen = resolved
@@ -1313,8 +1317,13 @@ struct PanelView: View {
         else { return .ignored }
 
         if let ch = press.characters.first, ch.isNumber, let d = ch.wholeNumberValue {
-            if editUnit == nil { editUnit = 60 } // no selection — edit minutes
-            mutateSelectedUnit { ($0 * 10 + d) % 100 }
+            if editUnit == nil {
+                editUnit = 60 // no selection — edit minutes
+                replaceNextTimerDigit = true
+            }
+            let replace = replaceNextTimerDigit
+            mutateSelectedUnit { TimerDigits.enterDigit(previous: $0, digit: d, replacing: replace) }
+            replaceNextTimerDigit = false
             if !pointerOnDigits { releaseDigitFocusSoon() }
             return .handled
         }
@@ -1392,6 +1401,9 @@ struct PanelView: View {
     }
 
     private func selectUnit(atX x: CGFloat, cell: CGFloat) {
+        // Each deliberate selection starts a fresh value. 2 → 02, not 52 if
+        // the previous preset happened to be 25 minutes.
+        replaceNextTimerDigit = true
         editUnit = unitForScrub(fraction: fraction(atX: x, cell: cell))
     }
 
@@ -1568,7 +1580,20 @@ struct PanelView: View {
         if confirmDeleteTab == id { confirmDeleteTab = nil }
     }
 
+    /// Prevent a stale timer digit selection or delayed focus-release task
+    /// from keeping the keyboard captured after a tab switch or panel close.
+    private func clearTimerEditOnExit() {
+        digitFocusRelease?.cancel()
+        digitFocusRelease = nil
+        editUnit = nil
+        pointerOnDigits = false
+        replaceNextTimerDigit = true
+    }
+
     private func switchToSpace(_ id: UUID) {
+        // Mark the internal interaction BEFORE altering SwiftUI content.
+        model.panelInternalNavigation?()
+        clearTimerEditOnExit()
         screen = .space(id)
         activeSpaceRaw = id.uuidString
     }
@@ -2284,8 +2309,8 @@ struct PanelView: View {
             }
             .buttonStyle(.plain)
             .hoverDim()
-            if state != .idle {
-                // reset — right next to start
+            if state == .running || state == .paused {
+                // Reset (stop and return to the configured duration).
                 Button {
                     model.engine.reset()
                 } label: {
@@ -2297,6 +2322,9 @@ struct PanelView: View {
                 }
                 .buttonStyle(.plain)
                 .hoverHighlight()
+            } else if !engine.isStopwatch && engine.duration > 0 {
+                // Clear is distinct from Reset, and only available when stopped.
+                clearTimerButton
             }
             Spacer(minLength: 6)
             // digits on the right, with breathing room from the buttons
@@ -2425,6 +2453,27 @@ struct PanelView: View {
             of: "{n}", with: TimeFormatting.display(model.engine.duration)))
     }
 
+    /// Explicitly clears the configured time. Reset intentionally retains it.
+    /// The engine refuses this destructive operation while running/paused.
+    private var clearTimerButton: some View {
+        Button {
+            model.panelInternalNavigation?()
+            model.engine.clearDuration()
+            chosenPreset = nil
+            editUnit = nil
+        } label: {
+            Image(systemName: "xmark.circle")
+                .font(.system(size: digitsLarge ? 12 : 10, weight: .semibold))
+                .foregroundStyle(Theme.textSecondary)
+                .frame(width: digitsLarge ? 26 : 21, height: digitsLarge ? 26 : 21)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .hoverHighlight()
+        .help("Clear timer to 00:00:00")
+        .accessibilityLabel("Clear timer to zero")
+    }
+
     // MARK: - Display
 
     private var display: some View {
@@ -2460,6 +2509,8 @@ struct PanelView: View {
             HStack(spacing: 14) {
                 if !scrubbable {
                     resetButton
+                } else if !model.engine.isStopwatch && model.engine.duration > 0 {
+                    clearTimerButton
                 }
                 if let stash = model.engine.stash {
                     restoreButton(stash)

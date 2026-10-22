@@ -264,9 +264,9 @@ struct PermissionsView: View {
 
     private func statusText(_ item: Item) -> String {
         switch item.granted {
-        case true: return L10n.t(.permGranted, lang)
-        case false: return L10n.t(.permNotGranted, lang)
-        case nil: return L10n.t(.permWhenUsed, lang)
+        case .some(let granted):
+            return L10n.t(granted ? .permGranted : .permNotGranted, lang)
+        case .none: return L10n.t(.permWhenUsed, lang)
         }
     }
 }
