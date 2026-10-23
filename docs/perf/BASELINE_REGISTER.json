@@ -1,0 +1,32 @@
+{
+  "program": "HOP-PERF-01",
+  "schema_version": "1.0",
+  "recorded_at_utc": "2026-10-23",
+  "repository": "miloszkonieczny/hop",
+  "immutable_references": {
+    "production_main": "af6c53a2d48ad87422ef606b8a77b13960eb6cd3",
+    "hop_dev_v1_5": "593eeec1d2d9cc6ac0ee2775b403146a58b8980d",
+    "hop_dev_v1_6": "7ec28b7d1e5764d86d66afa53d3244d667c6ba9e"
+  },
+  "prior_test_evidence": {
+    "v1_5": "automated tests PASS; local tab-navigation acceptance FAIL",
+    "v1_6": "1581 tests PASS; local responsiveness and tab-navigation acceptance FAIL",
+    "process_cpu": "NOT MEASURED ON USER MAC",
+    "gui_performance": "NOT QUALIFIED"
+  },
+  "constraints": {
+    "application_build": "HOP_RELEASE_BUILD=1 ./scripts/build-app.sh --dev",
+    "dev_bundle_id": "com.antonshakirov.minimo.dev",
+    "target_machine": "Apple Silicon M1 with 8 GB RAM",
+    "workflows_read_only_to_production": true,
+    "no_merge": true,
+    "no_release": true,
+    "no_install": true,
+    "no_independent_approval_claimed": true
+  },
+  "baseline_measurements": {
+    "v1_5": null,
+    "v1_6": null,
+    "no_hop_process": null
+  }
+}

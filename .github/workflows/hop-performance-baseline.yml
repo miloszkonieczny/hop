@@ -1,0 +1,158 @@
+name: Hop PERF-01 — Frozen Baseline Measurement
+
+on:
+  push:
+    branches:
+      - hop-perf/2026-10-23-observability
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hop-perf-01-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  sampler-test:
+    name: Verify process sampler
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Test sampler including early-exit and identity boundaries
+        run: python3 scripts/perf/test_process_sampler.py
+
+  benchmark:
+    name: Frozen optimized ${{ matrix.candidate }} (headless, no GUI acceptance)
+    runs-on: macos-15
+    timeout-minutes: 100
+    needs: sampler-test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - candidate: v1_5
+            source_ref: 593eeec1d2d9cc6ac0ee2775b403146a58b8980d
+          - candidate: v1_6
+            source_ref: 7ec28b7d1e5764d86d66afa53d3244d667c6ba9e
+    steps:
+      - name: Checkout sampler from exact triggering revision
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.sha }}
+          path: harness
+          persist-credentials: false
+      - name: Checkout frozen candidate
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ matrix.source_ref }}
+          path: candidate
+          persist-credentials: false
+      - name: Confirm source identities, toolchain and host context
+        shell: bash
+        env:
+          SOURCE_REF: ${{ matrix.source_ref }}
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          test "$(git -C candidate rev-parse HEAD)" = "$SOURCE_REF"
+          test "$(git -C harness rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(uname -m)" = arm64
+          {
+            echo "harness_sha=$GITHUB_SHA"
+            echo "candidate_sha=$SOURCE_REF"
+            echo "runner_arch=$(uname -m)"
+            echo "runner_image=$ImageOS $ImageVersion"
+            echo "cpu_count=$(sysctl -n hw.logicalcpu)"
+            sysctl hw.model
+            sw_vers
+            xcodebuild -version
+            swift --version
+            sysctl vm.swapusage
+            ps -axo pid,ppid,%cpu,rss,comm | sort -k3nr | head -n 15 || true
+          } > evidence/environment.txt
+          cat evidence/environment.txt
+      - name: Build optimized, isolated Hop Dev without installation
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd candidate
+          HOP_RELEASE_BUILD=1 ./scripts/build-app.sh --dev > ../evidence/build.log 2>&1 || {
+            tail -n 100 ../evidence/build.log
+            exit 1
+          }
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' 'dist/Hop Dev.app/Contents/Info.plist')" = 'com.antonshakirov.minimo.dev'
+          test "$(lipo -archs 'dist/Hop Dev.app/Contents/MacOS/Hop')" = arm64
+          codesign --verify --strict 'dist/Hop Dev.app'
+          shasum -a 256 'dist/Hop Dev.app/Contents/MacOS/Hop' > ../evidence/executable-sha256.txt
+          echo 'optimized_dev_build=true;notarized=false;installed=false' > ../evidence/build-classification.txt
+      - name: Bounded process-only observation (headless; may be inconclusive)
+        shell: bash
+        env:
+          LABEL: ${{ matrix.candidate }}
+        run: |
+          set -euo pipefail
+          binary="$PWD/candidate/dist/Hop Dev.app/Contents/MacOS/Hop"
+          "$binary" > evidence/app-stdout.log 2> evidence/app-stderr.log &
+          pid=$!
+          cleanup() {
+            if kill -0 "$pid" 2>/dev/null; then
+              kill -TERM "$pid" 2>/dev/null || true
+              sleep 1
+              kill -KILL "$pid" 2>/dev/null || true
+            fi
+            wait "$pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          sleep 10
+          if ! kill -0 "$pid" 2>/dev/null; then
+            printf '{"status":"INCONCLUSIVE_NO_GUI_PROCESS", "candidate":"%s"}\n' "$LABEL" > "evidence/${LABEL}-measurement.json"
+            echo 'Unattended process exited before observation: GUI qualification unavailable.'
+            exit 0
+          fi
+          for trial in 1 2 3; do
+            if ! python3 harness/scripts/perf/process_sampler.py \
+              --pid "$pid" --seconds 60 --interval 2 \
+              --expected-command-substring 'Hop Dev.app/Contents/MacOS/Hop' \
+              --output "evidence/${LABEL}-trial-${trial}.json"; then
+              echo "Sampler non-success in trial $trial (preserving JSON; no performance PASS)."
+              break
+            fi
+          done
+          sysctl vm.swapusage > evidence/after-swap.txt
+      - name: Evidence manifest and summary
+        if: always()
+        shell: bash
+        env:
+          LABEL: ${{ matrix.candidate }}
+          SOURCE_REF: ${{ matrix.source_ref }}
+        run: |
+          mkdir -p evidence
+          python3 - <<'PY'
+          import hashlib,json,os
+          from pathlib import Path
+          root=Path('evidence')
+          scores=[]
+          for p in sorted(root.glob('*-trial-*.json')):
+              data=json.loads(p.read_text())
+              scores.append({'file':p.name,'status':data.get('status'),'cpu_core_equivalent_percent':data.get('cpu_core_equivalent_percent'),'rss_kib_max':data.get('rss_kib_max')})
+          manifest={
+              'schema':'HOP-PERF-01-1.0', 'verdict':'OBSERVATION_ONLY_NOT_QUALIFIED',
+              'source_ref':os.environ['SOURCE_REF'], 'harness_sha':os.environ['GITHUB_SHA'],
+              'candidate':os.environ['LABEL'], 'scores':scores,
+              'files':[{'path':str(p),'size':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest()} for p in sorted(root.iterdir()) if p.is_file()]
+          }
+          (root/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
+          print(json.dumps({k:v for k,v in manifest.items() if k!='files'},indent=2))
+          PY
+      - name: Upload raw evidence, including incomplete attempts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: hop-perf-01-${{ matrix.candidate }}-${{ github.sha }}-${{ github.run_id }}
+          path: evidence/
+          retention-days: 30
+          if-no-files-found: warn
