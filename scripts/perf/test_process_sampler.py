@@ -50,5 +50,46 @@ class SamplerTests(unittest.TestCase):
             child.wait(timeout=5)
 
 
+    def test_process_identity_changed_ppid_is_fail_closed(self):
+        from unittest.mock import patch
+        import process_sampler as ps
+        t = [0.]
+        n = [0]
+        def sampled(pid):
+            n[0] += 1
+            return {"pid": pid, "ppid": 101 if n[0] == 1 else 202,
+                    "ps_cpu_percent_proxy": 5., "rss_kib": 1024,
+                    "cpu_time_seconds": 4. + n[0],
+                    "command": "/tmp/Hop Dev.app/Contents/MacOS/Hop",
+                    "started_at": "Sun Oct 25 12:00:00 2026"}
+        def advance(amount):
+            t[0] += amount
+        with patch.object(ps, "get_process", side_effect=sampled), \
+             patch.object(ps.time, "monotonic", side_effect=lambda: t[0]), \
+             patch.object(ps.time, "sleep", side_effect=advance):
+            outcome = ps.run(9999, 5, 1, "Hop Dev.app/Contents/MacOS/Hop")
+        self.assertEqual(outcome["status"], "FAIL_PROCESS_IDENTITY_CHANGED")
+
+    def test_process_birth_time_changed_is_fail_closed(self):
+        from unittest.mock import patch
+        import process_sampler as ps
+        t = [0.]
+        n = [0]
+        def sampled(pid):
+            n[0] += 1
+            return {"pid": pid, "ppid": 101,
+                    "ps_cpu_percent_proxy": 5., "rss_kib": 1024,
+                    "cpu_time_seconds": 4. + n[0],
+                    "command": "/tmp/Hop Dev.app/Contents/MacOS/Hop",
+                    "started_at": "Sun Oct 25 12:00:00 2026" if n[0] == 1 else "Sun Oct 25 12:00:01 2026"}
+        def advance(amount):
+            t[0] += amount
+        with patch.object(ps, "get_process", side_effect=sampled), \
+             patch.object(ps.time, "monotonic", side_effect=lambda: t[0]), \
+             patch.object(ps.time, "sleep", side_effect=advance):
+            outcome = ps.run(9999, 5, 1, "Hop Dev.app/Contents/MacOS/Hop")
+        self.assertEqual(outcome["status"], "FAIL_PROCESS_IDENTITY_CHANGED")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

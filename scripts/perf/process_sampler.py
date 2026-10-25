@@ -59,16 +59,22 @@ def percentile(values: list[float], percentile_value: float) -> float | None:
 
 def get_process(pid: int) -> dict | None:
     result = subprocess.run(
-        ["ps", "-p", str(pid), "-o", "pid=", "-o", "ppid=", "-o", "%cpu=", "-o", "rss=", "-o", "time=", "-o", "state=", "-o", "command="],
-        capture_output=True, text=True, check=False, timeout=5,
+        ["ps", "-p", str(pid), "-o", "pid=", "-o", "ppid=", "-o", "%cpu=", "-o", "rss=", "-o", "time=", "-o", "state=", "-o", "lstart=", "-o", "command="],
+        capture_output=True, text=True, check=False, timeout=5, env={**os.environ, "LC_ALL": "C"},
     )
     if result.returncode != 0 or not result.stdout.strip():
         return None
     # The command (path/arguments) can contain arbitrary spaces; parse fixed fields.
-    matched = re.match(r"^\s*(\d+)\s+(\d+)\s+([\d.]+)\s+(\d+)\s+(\S+)\s+(\S+)\s+(.+?)\s*$", result.stdout, re.S)
+    matched = re.match(
+        r"^\s*(\d+)\s+(\d+)\s+([\d.]+)\s+(\d+)\s+(\S+)\s+(\S+)\s+"
+        r"((?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+"
+        r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+"
+        r"\d{1,2}\s+\d{2}:\d{2}:\d{2}\s+\d{4})\s+(.+?)\s*$",
+        result.stdout, re.S,
+    )
     if not matched:
         raise ValueError("unexpected ps output; cannot safely interpret process identity")
-    actual, parent, cpu, rss, cpu_time, state, command = matched.groups()
+    actual, parent, cpu, rss, cpu_time, state, started_at, command = matched.groups()
     if "Z" in state.upper():
         return None  # zombie no longer performs any work
     if int(actual) != pid:
@@ -76,7 +82,7 @@ def get_process(pid: int) -> dict | None:
     return {
         "pid": int(actual), "ppid": int(parent), "ps_cpu_percent_proxy": float(cpu),
         "rss_kib": int(rss), "cpu_time_seconds": parse_cpu_time(cpu_time),
-        "command": command,
+        "command": command, "started_at": " ".join(started_at.split()),
     }
 
 
@@ -84,6 +90,7 @@ def run(pid: int, seconds: float, interval: float, expected_substring: str) -> d
     if not (0 < pid and 5 <= seconds <= 600 and 0.25 <= interval <= 30):
         raise ValueError("invalid bounds")
     start = time.monotonic()
+    start_utc = dt.datetime.now(dt.timezone.utc).isoformat()
     first = get_process(pid)
     if first is None:
         return {"status": "INCONCLUSIVE_NOT_RUNNING", "pid": pid, "samples": []}
@@ -101,7 +108,11 @@ def run(pid: int, seconds: float, interval: float, expected_substring: str) -> d
             break
         # Protect against PID reuse: a reused PID can have a different command
         # and/or reset cumulative CPU time; never misattribute to the old app.
-        if expected_substring not in current["command"] or current["cpu_time_seconds"] < previous:
+        if (expected_substring not in current["command"]
+                or current["command"] != first["command"]
+                or current["ppid"] != first["ppid"]
+                or current["started_at"] != first["started_at"]
+                or current["cpu_time_seconds"] < previous):
             return {"status": "FAIL_PROCESS_IDENTITY_CHANGED", "pid": pid, "samples": samples}
         previous = current["cpu_time_seconds"]
         samples.append({"elapsed_seconds": time.monotonic() - start, **current})
@@ -112,7 +123,7 @@ def run(pid: int, seconds: float, interval: float, expected_substring: str) -> d
     cpu_proxies = [a["ps_cpu_percent_proxy"] for a in samples[1:]]
     return {
         "status": "MEASURED_PROCESS_ONLY" if complete else "INCONCLUSIVE_EARLY_EXIT",
-        "pid": pid, "start_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "pid": pid, "start_utc": start_utc,
         "elapsed_seconds": elapsed,
         "cpu_time_delta_seconds": cpu_delta,
         "cpu_core_equivalent_percent": 100 * cpu_delta / elapsed if elapsed > 0 else None,
@@ -126,6 +137,7 @@ def run(pid: int, seconds: float, interval: float, expected_substring: str) -> d
             "ps %CPU is a sampled scheduling proxy, not instantaneous process usage.",
             "No GUI tab-switching/UX/performance qualification is provided.",
             "Only the specified PID is sampled, not all child/helper processes.",
+            "Process birth-time identity is bounded by ps lstart one-second precision; hostile same-second PID reuse remains possible.",
         ],
     }
 
