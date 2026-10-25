@@ -1520,6 +1520,20 @@ struct HopApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     init() {
+        // Read-only version metadata is intentionally available to optimized
+        // builds. It must exit before AppKit startup or the menu-bar application
+        // will hang callers that need a version string during packaging.
+        // All privileged development/self-test commands remain DEBUG-only.
+        if CommandLine.arguments.contains("--preparing-version") {
+            guard let version = ReleaseNews.preparing(notes: L10n.t(.docNews, .en),
+                                                       cards: PanelView.releaseCardIDs) else {
+                print("version: the release notes and the release cards disagree")
+                exit(1)
+            }
+            print(version)
+            exit(0)
+        }
+
         // Dev-only entry points, gated out of release:
         //  • --torrent-selftest runs an ARBITRARY binary path (skipping the engine
         //    signature check) — a launch-arbitrary-binary gadget if shipped.
